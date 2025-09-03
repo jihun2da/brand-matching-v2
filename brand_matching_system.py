@@ -12,6 +12,13 @@ from typing import List, Dict, Tuple
 from functools import lru_cache
 import concurrent.futures
 from threading import Lock
+from difflib import SequenceMatcher
+try:
+    import Levenshtein
+    LEVENSHTEIN_AVAILABLE = True
+except ImportError:
+    LEVENSHTEIN_AVAILABLE = False
+    logger.warning("python-Levenshtein not available, using fallback similarity calculation")
 from brand_sheets_api import brand_sheets_api
 
 logger = logging.getLogger(__name__)
@@ -66,6 +73,107 @@ class BrandMatchingSystem:
         })
         
         logger.info(f"정규식 패턴 {len(self._compiled_patterns)}개 컴파일 완료")
+
+    def calculate_string_similarity(self, str1: str, str2: str) -> float:
+        """문자열 유사도 계산 (0.0 ~ 1.0)"""
+        if not str1 or not str2:
+            return 0.0
+        
+        str1 = str1.lower().strip()
+        str2 = str2.lower().strip()
+        
+        if str1 == str2:
+            return 1.0
+        
+        if LEVENSHTEIN_AVAILABLE:
+            # Levenshtein 거리 기반 유사도
+            max_len = max(len(str1), len(str2))
+            if max_len == 0:
+                return 1.0
+            distance = Levenshtein.distance(str1, str2)
+            return 1.0 - (distance / max_len)
+        else:
+            # SequenceMatcher 기반 유사도 (fallback)
+            return SequenceMatcher(None, str1, str2).ratio()
+    
+    def calculate_color_similarity(self, color1: str, color2: str) -> float:
+        """색상 유사도 계산 - 오타 및 변형 허용"""
+        if not color1 or not color2:
+            return 0.0
+        
+        # 기본 문자열 유사도
+        base_similarity = self.calculate_string_similarity(color1, color2)
+        
+        # 색상 변형 매핑 (한글-영어, 오타 등)
+        color_mappings = {
+            '메란지': ['멜란지', 'melange', '메렌지'],
+            '멜란지': ['메란지', 'melange', '메렌지'],
+            '블랙': ['black', '검정', '검은색'],
+            '화이트': ['white', '흰색', '하얀색'],
+            '레드': ['red', '빨강', '빨간색'],
+            '블루': ['blue', '파랑', '파란색', '블루'],
+            '그린': ['green', '초록', '초록색'],
+            '옐로우': ['yellow', '노랑', '노란색'],
+            '핑크': ['pink', '분홍', '분홍색'],
+            '그레이': ['gray', 'grey', '회색'],
+            '베이지': ['beige', '베이지색'],
+            '네이비': ['navy', '남색'],
+        }
+        
+        # 변형 매핑 확인
+        color1_lower = color1.lower()
+        color2_lower = color2.lower()
+        
+        for main_color, variants in color_mappings.items():
+            if (color1_lower == main_color or color1_lower in variants) and \
+               (color2_lower == main_color or color2_lower in variants):
+                return 0.95  # 높은 유사도
+        
+        return base_similarity
+    
+    def calculate_size_similarity(self, size1: str, size2: str) -> float:
+        """사이즈 유사도 계산 - 다양한 표기법 허용"""
+        if not size1 or not size2:
+            return 0.0
+        
+        # 기본 문자열 유사도
+        base_similarity = self.calculate_string_similarity(size1, size2)
+        
+        # 사이즈 변형 매핑
+        size_mappings = {
+            'xs': ['엑스에스', 'x-small', 'extra small'],
+            's': ['에스', 'small', '소'],
+            'm': ['엠', 'medium', '중', '미디움'],
+            'l': ['엘', 'large', '대', '라지'],
+            'xl': ['엑스엘', 'x-large', 'extra large'],
+            'xxl': ['더블엑스엘', '2xl', 'xx-large'],
+            'xxxl': ['트리플엑스엘', '3xl', 'xxx-large'],
+            'free': ['프리', '프리사이즈', 'one size'],
+        }
+        
+        size1_lower = size1.lower()
+        size2_lower = size2.lower()
+        
+        # 숫자 사이즈 처리 (예: 90, 95, 100)
+        if size1_lower.isdigit() and size2_lower.isdigit():
+            num1, num2 = int(size1_lower), int(size2_lower)
+            diff = abs(num1 - num2)
+            if diff == 0:
+                return 1.0
+            elif diff <= 5:
+                return 0.8
+            elif diff <= 10:
+                return 0.6
+            else:
+                return base_similarity
+        
+        # 변형 매핑 확인
+        for main_size, variants in size_mappings.items():
+            if (size1_lower == main_size or size1_lower in variants) and \
+               (size2_lower == main_size or size2_lower in variants):
+                return 0.95  # 높은 유사도
+        
+        return base_similarity
 
     @lru_cache(maxsize=1000)
     def _get_keyword_pattern(self, keyword: str) -> re.Pattern:
@@ -368,6 +476,146 @@ class BrandMatchingSystem:
         
         return color, size
 
+    def find_similar_products_for_failed_matches(self, failed_products: List[Dict]) -> pd.DataFrame:
+        """매칭 실패한 상품들에 대해 유사도 기반 매칭 수행"""
+        logger.info(f"매칭 실패 상품 {len(failed_products)}개에 대해 유사도 매칭 시작")
+        
+        if self.brand_data is None or self.brand_data.empty:
+            logger.error("브랜드 데이터가 없습니다")
+            return pd.DataFrame()
+        
+        results = []
+        
+        for i, failed_product in enumerate(failed_products):
+            logger.debug(f"유사도 매칭 진행: {i+1}/{len(failed_products)}")
+            
+            # 실패한 상품 정보 추출
+            brand = failed_product.get('브랜드', '').strip()
+            product_name = failed_product.get('상품명', '').strip()
+            color = failed_product.get('색상', '').strip()
+            size = failed_product.get('사이즈', '').strip()
+            
+            # 상품명 정규화
+            normalized_product_name = self.normalize_product_name(product_name)
+            
+            best_match = None
+            best_score = 0.0
+            
+            # 브랜드 데이터에서 유사한 상품 찾기
+            for _, brand_row in self.brand_data.iterrows():
+                brand_brand = str(brand_row.get('브랜드', '')).strip()
+                brand_product = str(brand_row.get('상품명', '')).strip()
+                brand_options = str(brand_row.get('옵션입력', '')).strip()
+                
+                # 브랜드 일치 확인 (브랜드가 다르면 스킵)
+                if brand and brand_brand and brand.lower() != brand_brand.lower():
+                    continue
+                
+                # 상품명 유사도 계산
+                brand_normalized = self.normalize_product_name(brand_product)
+                product_similarity = self.calculate_string_similarity(normalized_product_name, brand_normalized)
+                
+                # 상품명 유사도가 너무 낮으면 스킵 (임계값: 0.3)
+                if product_similarity < 0.3:
+                    continue
+                
+                # 색상/사이즈 유사도 계산
+                color_similarity = 0.0
+                size_similarity = 0.0
+                
+                if color or size:
+                    # 브랜드 상품의 색상/사이즈 추출
+                    brand_color = self.extract_color(brand_options)
+                    brand_size = self.extract_size(brand_options)
+                    
+                    if color and brand_color:
+                        # 색상 변형들과 비교
+                        color_variants = self.parse_color_variants(color)
+                        brand_color_variants = self.parse_color_variants(brand_color)
+                        
+                        max_color_sim = 0.0
+                        for c1 in color_variants:
+                            for c2 in brand_color_variants:
+                                sim = self.calculate_color_similarity(c1, c2)
+                                max_color_sim = max(max_color_sim, sim)
+                        color_similarity = max_color_sim
+                    
+                    if size and brand_size:
+                        # 사이즈 변형들과 비교
+                        size_variants = self.parse_size_variants(size)
+                        brand_size_variants = self.parse_size_variants(brand_size)
+                        
+                        max_size_sim = 0.0
+                        for s1 in size_variants:
+                            for s2 in brand_size_variants:
+                                sim = self.calculate_size_similarity(s1, s2)
+                                max_size_sim = max(max_size_sim, sim)
+                        size_similarity = max_size_sim
+                
+                # 종합 유사도 계산 (가중평균)
+                # 상품명 60%, 색상 20%, 사이즈 20%
+                total_score = (product_similarity * 0.6 + 
+                              color_similarity * 0.2 + 
+                              size_similarity * 0.2)
+                
+                # 색상이나 사이즈가 없는 경우 상품명 비중 증가
+                if not color and not size:
+                    total_score = product_similarity
+                elif not color:
+                    total_score = product_similarity * 0.8 + size_similarity * 0.2
+                elif not size:
+                    total_score = product_similarity * 0.8 + color_similarity * 0.2
+                
+                # 최고 점수 업데이트
+                if total_score > best_score:
+                    best_score = total_score
+                    best_match = {
+                        'brand_brand': brand_brand,
+                        'brand_product': brand_product,
+                        'brand_wholesale': brand_row.get('중도매', ''),
+                        'brand_supply': brand_row.get('공급가', ''),
+                        'brand_options': brand_options,
+                        'product_similarity': product_similarity,
+                        'color_similarity': color_similarity,
+                        'size_similarity': size_similarity,
+                        'total_score': total_score
+                    }
+            
+            # 결과 저장
+            result_row = {
+                '원본_브랜드': brand,
+                '원본_상품명': product_name,
+                '원본_색상': color,
+                '원본_사이즈': size,
+                '유사상품_브랜드': best_match['brand_brand'] if best_match else '',
+                '유사상품_상품명': best_match['brand_product'] if best_match else '',
+                '유사상품_중도매': best_match['brand_wholesale'] if best_match else '',
+                '유사상품_공급가': best_match['brand_supply'] if best_match else '',
+                '유사상품_옵션': best_match['brand_options'] if best_match else '',
+                '상품명_유사도': f"{best_match['product_similarity']:.3f}" if best_match else '0.000',
+                '색상_유사도': f"{best_match['color_similarity']:.3f}" if best_match else '0.000',
+                '사이즈_유사도': f"{best_match['size_similarity']:.3f}" if best_match else '0.000',
+                '종합_유사도': f"{best_match['total_score']:.3f}" if best_match else '0.000',
+                '매칭_상태': '유사매칭' if best_match and best_match['total_score'] >= 0.3 else '매칭실패'
+            }
+            
+            # 원본 데이터의 다른 컬럼들도 추가
+            for key, value in failed_product.items():
+                if key not in result_row:
+                    result_row[f'원본_{key}'] = value
+            
+            results.append(result_row)
+        
+        # 결과를 DataFrame으로 변환
+        result_df = pd.DataFrame(results)
+        
+        # 유사도 순으로 정렬
+        if not result_df.empty:
+            result_df = result_df.sort_values('종합_유사도', ascending=False)
+        
+        logger.info(f"유사도 매칭 완료: {len(result_df)}개 결과")
+        return result_df
+
     def _process_batch(self, batch_data):
         """배치 데이터 처리 (병렬 처리용)"""
         results = []
@@ -576,8 +824,8 @@ class BrandMatchingSystem:
         
         return ""
 
-    def match_row(self, brand: str, product: str, size: str, color: str = "") -> Tuple[str, str, str]:
-        """브랜드, 상품명, 사이즈, 색상으로 매칭하여 공급가, 중도매, 브랜드+상품명 반환"""
+    def match_row(self, brand: str, product: str, size: str, color: str = "") -> Tuple[str, str, str, bool]:
+        """브랜드, 상품명, 사이즈, 색상으로 매칭하여 공급가, 중도매, 브랜드+상품명, 매칭성공여부 반환"""
         brand = str(brand).strip()
         product = str(product).strip()
         size = str(size).strip().lower()
@@ -730,21 +978,22 @@ class BrandMatchingSystem:
             
             logger.debug(f"최종 매칭 선택: {best_match['브랜드상품명']} (점수: {best_match['score']}, 타입: {best_match['type']})")
             
-            return best_match['공급가'], best_match['중도매'], best_match['브랜드상품명']
+            return best_match['공급가'], best_match['중도매'], best_match['브랜드상품명'], True
 
         logger.debug("매칭 실패")
-        return "매칭 실패", "", ""
+        return "매칭 실패", "", "", False
 
-    def process_matching(self, sheet2_df: pd.DataFrame) -> pd.DataFrame:
-        """Sheet2 데이터에 대해 매칭 수행"""
+    def process_matching(self, sheet2_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
+        """Sheet2 데이터에 대해 매칭 수행하고 매칭 실패한 상품들 반환"""
         logger.info("매칭 처리 시작")
 
         if sheet2_df.empty:
             logger.warning("처리할 데이터가 없습니다")
-            return sheet2_df
+            return sheet2_df, []
 
         success_count = 0
         total_count = len(sheet2_df)
+        failed_products = []  # 매칭 실패한 상품들
 
         for idx, row in sheet2_df.iterrows():
             # 브랜드, 상품명, 사이즈 추출
@@ -755,17 +1004,17 @@ class BrandMatchingSystem:
             quantity = row.get('L열(수량)', 1)
 
             # 빈 값 체크
-            if not brand or not product or not size:
+            if not brand or not product:
                 sheet2_df.at[idx, 'N열(중도매명)'] = ""
                 sheet2_df.at[idx, 'O열(도매가격)'] = 0
                 sheet2_df.at[idx, 'W열(금액)'] = 0
                 continue
 
             # 매칭 수행
-            공급가, 중도매, 브랜드상품명 = self.match_row(brand, product, size, color)
+            공급가, 중도매, 브랜드상품명, success = self.match_row(brand, product, size, color)
 
             # 결과 저장
-            if 공급가 != "매칭 실패":
+            if success and 공급가 != "매칭 실패":
                 sheet2_df.at[idx, 'N열(중도매명)'] = 중도매
                 sheet2_df.at[idx, 'O열(도매가격)'] = 공급가
                 # W열 금액 계산: 도매가격 × 수량
@@ -776,14 +1025,47 @@ class BrandMatchingSystem:
                     sheet2_df.at[idx, 'W열(금액)'] = 0
                 success_count += 1
             else:
+                # 매칭 실패한 상품 정보 수집
+                failed_product = {
+                    '브랜드': brand,
+                    '상품명': product,
+                    '색상': color,
+                    '사이즈': size,
+                    '수량': quantity,
+                    '행번호': idx
+                }
+                
+                # 원본 행의 모든 데이터 추가
+                for col_name, col_value in row.items():
+                    if col_name not in failed_product:
+                        failed_product[col_name] = col_value
+                
+                failed_products.append(failed_product)
+                
                 sheet2_df.at[idx, 'N열(중도매명)'] = ""
                 sheet2_df.at[idx, 'O열(도매가격)'] = 0
                 sheet2_df.at[idx, 'W열(금액)'] = 0
 
         success_rate = (success_count / total_count * 100) if total_count > 0 else 0
         logger.info(f"매칭 완료: {success_count}/{total_count} ({success_rate:.1f}%)")
+        logger.info(f"매칭 실패: {len(failed_products)}개 상품")
 
-        return sheet2_df
+        return sheet2_df, failed_products
+
+    def process_matching_with_similarity(self, sheet2_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+        """매칭 수행 후 실패한 상품들에 대해 유사도 매칭 추가 수행"""
+        logger.info("정확 매칭 + 유사도 매칭 처리 시작")
+        
+        # 1단계: 정확 매칭
+        matched_df, failed_products = self.process_matching(sheet2_df)
+        
+        # 2단계: 매칭 실패한 상품들에 대해 유사도 매칭
+        similarity_results_df = pd.DataFrame()
+        if failed_products:
+            logger.info(f"매칭 실패한 {len(failed_products)}개 상품에 대해 유사도 매칭 시작")
+            similarity_results_df = self.find_similar_products_for_failed_matches(failed_products)
+        
+        return matched_df, similarity_results_df
 
     def save_to_excel(self, sheet2_df: pd.DataFrame, filename: str = "브랜드매칭결과.xlsx"):
         """Sheet2 형식으로 엑셀 파일 저장"""
@@ -806,4 +1088,73 @@ class BrandMatchingSystem:
 
         except Exception as e:
             logger.error(f"엑셀 파일 저장 실패: {e}")
-            raise e 
+            raise e
+
+    def save_similarity_results_to_excel(self, similarity_df: pd.DataFrame, filename: str = "유사도매칭결과.xlsx"):
+        """유사도 매칭 결과를 엑셀 파일로 저장"""
+        try:
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                # 유사도 매칭 결과 저장
+                similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
+
+                # 컬럼 너비 조정
+                worksheet = writer.sheets['유사도매칭결과']
+                for i, column in enumerate(similarity_df.columns, 1):
+                    column_letter = self._get_column_letter(i)
+                    
+                    # 컬럼명에 따른 너비 조정
+                    if '상품명' in column:
+                        worksheet.column_dimensions[column_letter].width = 30
+                    elif '유사도' in column:
+                        worksheet.column_dimensions[column_letter].width = 12
+                    elif '브랜드' in column:
+                        worksheet.column_dimensions[column_letter].width = 15
+                    elif '색상' in column or '사이즈' in column:
+                        worksheet.column_dimensions[column_letter].width = 15
+                    elif '중도매' in column or '공급가' in column:
+                        worksheet.column_dimensions[column_letter].width = 12
+                    else:
+                        worksheet.column_dimensions[column_letter].width = 15
+
+                # 헤더 스타일 적용
+                from openpyxl.styles import Font, PatternFill, Alignment
+                header_font = Font(bold=True, color="FFFFFF")
+                header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+                
+                for cell in worksheet[1]:
+                    cell.font = header_font
+                    cell.fill = header_fill
+                    cell.alignment = Alignment(horizontal="center")
+
+                # 유사도 컬럼에 조건부 서식 적용
+                for col_idx, column in enumerate(similarity_df.columns, 1):
+                    if '유사도' in column:
+                        column_letter = self._get_column_letter(col_idx)
+                        for row_idx in range(2, len(similarity_df) + 2):
+                            cell = worksheet[f"{column_letter}{row_idx}"]
+                            try:
+                                value = float(cell.value)
+                                if value >= 0.8:
+                                    cell.fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
+                                elif value >= 0.6:
+                                    cell.fill = PatternFill(start_color="FFEB9C", end_color="FFEB9C", fill_type="solid")
+                                elif value >= 0.3:
+                                    cell.fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+                            except:
+                                pass
+
+            logger.info(f"유사도 매칭 결과 저장 완료: {filename}")
+            return filename
+
+        except Exception as e:
+            logger.error(f"유사도 매칭 결과 저장 실패: {e}")
+            raise e
+
+    def _get_column_letter(self, col_idx: int) -> str:
+        """컬럼 인덱스를 엑셀 컬럼 문자로 변환"""
+        result = ""
+        while col_idx > 0:
+            col_idx -= 1
+            result = chr(col_idx % 26 + ord('A')) + result
+            col_idx //= 26
+        return result 
