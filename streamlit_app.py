@@ -1,19 +1,8 @@
 import streamlit as st
 import numpy as np
 from PIL import Image
-import base64
-import io
 import json
 from datetime import datetime
-import logging
-
-# OpenCV import with error handling
-try:
-    import cv2
-    OPENCV_AVAILABLE = True
-except ImportError:
-    OPENCV_AVAILABLE = False
-    st.warning("OpenCV is not available. Some features may be limited.")
 
 # Page configuration
 st.set_page_config(
@@ -118,63 +107,51 @@ BRAND_DATABASE = {
 }
 
 def extract_features(image):
-    """Extract features from image using OpenCV or fallback methods"""
+    """Extract features from image using PIL and NumPy only"""
     try:
         # Convert PIL image to numpy array
         img_array = np.array(image)
         
-        if OPENCV_AVAILABLE:
-            # OpenCV method
-            if len(img_array.shape) == 3:
-                img_rgb = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
-            else:
-                img_rgb = img_array
-            
-            # Extract dominant colors
-            img_resized = cv2.resize(img_rgb, (50, 50))
-            colors = img_resized.reshape(-1, 3)
-            unique_colors = np.unique(colors, axis=0)
-            
-            # Get image dimensions
-            height, width = img_rgb.shape[:2]
-            
-            # Calculate color histogram
-            hist_r = cv2.calcHist([img_rgb], [2], None, [32], [0, 256])
-            hist_g = cv2.calcHist([img_rgb], [1], None, [32], [0, 256])
-            hist_b = cv2.calcHist([img_rgb], [0], None, [32], [0, 256])
-            
-            features = {
-                'dominant_colors': unique_colors[:10].tolist(),
-                'dimensions': [width, height],
-                'color_histogram': {
-                    'r': hist_r.flatten().tolist(),
-                    'g': hist_g.flatten().tolist(), 
-                    'b': hist_b.flatten().tolist()
-                }
-            }
+        # Get image dimensions
+        if len(img_array.shape) == 3:
+            height, width, channels = img_array.shape
         else:
-            # Fallback method without OpenCV
-            if len(img_array.shape) == 3:
-                # RGB image
-                height, width, _ = img_array.shape
-                # Simple color extraction
-                resized = np.array(image.resize((50, 50)))
-                colors = resized.reshape(-1, 3)
-                unique_colors = np.unique(colors, axis=0)
-            else:
-                # Grayscale image
-                height, width = img_array.shape
-                unique_colors = [[128, 128, 128]]  # Default gray
-            
-            features = {
-                'dominant_colors': unique_colors[:10].tolist(),
-                'dimensions': [width, height],
-                'color_histogram': {
-                    'r': [0] * 32,
-                    'g': [0] * 32,
-                    'b': [0] * 32
-                }
+            height, width = img_array.shape
+            channels = 1
+        
+        # Simple color extraction using PIL
+        # Resize image for faster processing
+        small_image = image.resize((50, 50))
+        small_array = np.array(small_image)
+        
+        if len(small_array.shape) == 3:
+            # RGB image - extract dominant colors
+            colors = small_array.reshape(-1, 3)
+            # Get unique colors (simplified)
+            unique_colors = []
+            for i in range(0, len(colors), len(colors)//10):  # Sample 10 colors
+                unique_colors.append(colors[i].tolist())
+        else:
+            # Grayscale image
+            unique_colors = [[128, 128, 128]]  # Default gray
+        
+        # Simple histogram calculation
+        if len(img_array.shape) == 3:
+            hist_r = np.histogram(img_array[:,:,0], bins=32, range=(0, 256))[0].tolist()
+            hist_g = np.histogram(img_array[:,:,1], bins=32, range=(0, 256))[0].tolist()
+            hist_b = np.histogram(img_array[:,:,2], bins=32, range=(0, 256))[0].tolist()
+        else:
+            hist_r = hist_g = hist_b = [0] * 32
+        
+        features = {
+            'dominant_colors': unique_colors[:10],
+            'dimensions': [width, height],
+            'color_histogram': {
+                'r': hist_r,
+                'g': hist_g,
+                'b': hist_b
             }
+        }
         
         return features
     except Exception as e:
@@ -334,15 +311,14 @@ def main():
         
         #### 🔧 주요 기능:
         - **이미지 업로드**: 다양한 형식의 이미지 지원
-        - **색상 분석**: OpenCV를 사용한 정밀한 색상 추출
+        - **색상 분석**: PIL과 NumPy를 사용한 색상 추출
         - **브랜드 매칭**: 색상 기반 브랜드 식별 알고리즘
         - **신뢰도 측정**: 각 매칭 결과의 정확도 표시
         
         #### 🛠️ 기술 스택:
         - **Streamlit**: 웹 애플리케이션 프레임워크
-        - **OpenCV**: 이미지 처리 및 분석
-        - **NumPy**: 수치 연산
         - **PIL**: 이미지 처리
+        - **NumPy**: 수치 연산
         
         #### 📈 향후 계획:
         - 머신러닝 모델 통합
