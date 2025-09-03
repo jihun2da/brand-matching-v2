@@ -188,7 +188,7 @@ def show_matching_page(matching_system, file_processor):
         
         result_df = st.session_state.matching_results
         similarity_df = st.session_state.similarity_results if hasattr(st.session_state, 'similarity_results') else pd.DataFrame()
-        matching_system = st.session_state.matching_system if hasattr(st.session_state, 'matching_system') else None
+        cached_matching_system = st.session_state.matching_system if hasattr(st.session_state, 'matching_system') else matching_system
         
         # 다운로드 버튼들
         download_col1, download_col2, download_col3 = st.columns(3)
@@ -211,12 +211,12 @@ def show_matching_page(matching_system, file_processor):
         
         with download_col2:
             # 유사도 매칭 결과만 다운로드
-            if not similarity_df.empty and matching_system:
+            if not similarity_df.empty and cached_matching_system:
                 filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                 temp_filename = f"temp_main_{filename}"
                 
                 try:
-                    matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+                    cached_matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
                     
                     with open(temp_filename, 'rb') as f:
                         file_data = f.read()
