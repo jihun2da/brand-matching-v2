@@ -129,7 +129,8 @@ def extract_features(image):
             colors = small_array.reshape(-1, 3)
             # Get unique colors (simplified)
             unique_colors = []
-            for i in range(0, len(colors), len(colors)//10):  # Sample 10 colors
+            step = max(1, len(colors)//10)  # Ensure step is at least 1
+            for i in range(0, len(colors), step):  # Sample 10 colors
                 unique_colors.append(colors[i].tolist())
         else:
             # Grayscale image
@@ -155,7 +156,7 @@ def extract_features(image):
         
         return features
     except Exception as e:
-        st.error(f"이미지 특성 추출 중 오류 발생: {str(e)}")
+        st.error("Image feature extraction failed: " + str(e))
         return None
 
 def match_brand(features):
