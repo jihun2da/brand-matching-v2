@@ -200,10 +200,14 @@ def show_matching_page(matching_system, file_processor):
                 with pd.ExcelWriter(output1, engine='openpyxl') as writer:
                     result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
                 
+                # 현재 시간 문자열 생성
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
                 st.download_button(
                     label="📊 정확 매칭 결과",
                     data=output1.getvalue(),
-                    file_name=f"정확매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    file_name=f"정확매칭결과_{current_time}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="main_download_exact"
@@ -212,7 +216,9 @@ def show_matching_page(matching_system, file_processor):
         with download_col2:
             # 유사도 매칭 결과만 다운로드
             if not similarity_df.empty and cached_matching_system:
-                filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"유사도매칭결과_{current_time}.xlsx"
                 temp_filename = f"temp_main_{filename}"
                 
                 try:
@@ -247,10 +253,14 @@ def show_matching_page(matching_system, file_processor):
                     if not similarity_df.empty:
                         similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
                 
+                # 현재 시간 문자열 생성
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
                 st.download_button(
                     label="📋 **전체 결과 통합**",
                     data=output_combined.getvalue(),
-                    file_name=f"브랜드매칭_전체결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    file_name=f"브랜드매칭_전체결과_{current_time}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="main_download_combined"
@@ -441,10 +451,14 @@ def show_results_with_similarity(result_df, similarity_df, matching_system):
                 with pd.ExcelWriter(output1, engine='openpyxl') as writer:
                     result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
                 
+                # 현재 시간 문자열 생성
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
                 st.download_button(
                     label="📊 정확 매칭 결과만",
                     data=output1.getvalue(),
-                    file_name=f"정확매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    file_name=f"정확매칭결과_{current_time}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="download_exact_only"
@@ -453,7 +467,9 @@ def show_results_with_similarity(result_df, similarity_df, matching_system):
         with download_col2:
             # 유사도 매칭 결과만 다운로드
             if not similarity_df.empty:
-                filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                filename = f"유사도매칭결과_{current_time}.xlsx"
                 temp_filename = f"temp_{filename}"
                 
                 # 임시 파일로 저장하여 스타일 적용
@@ -492,10 +508,14 @@ def show_results_with_similarity(result_df, similarity_df, matching_system):
                     if not similarity_df.empty:
                         similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
                 
+                # 현재 시간 문자열 생성
+                from datetime import datetime
+                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                
                 st.download_button(
                     label="📋 **전체 결과 통합**",
                     data=output_combined.getvalue(),
-                    file_name=f"브랜드매칭_전체결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    file_name=f"브랜드매칭_전체결과_{current_time}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     use_container_width=True,
                     key="download_combined"
