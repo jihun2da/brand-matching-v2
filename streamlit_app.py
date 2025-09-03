@@ -163,6 +163,12 @@ def show_matching_page(matching_system, file_processor):
             # 매칭 실행 버튼
             st.markdown("---")
             if st.button("🚀 매칭 시작", type="primary", use_container_width=True):
+                # 세션 상태 초기화
+                st.session_state.matching_results = None
+                st.session_state.similarity_results = None
+                st.session_state.matching_completed = False
+                
+                # 매칭 처리 실행
                 process_matching(uploaded_files, matching_system, file_processor)
         else:
             st.markdown("""
@@ -171,6 +177,99 @@ def show_matching_page(matching_system, file_processor):
                 위의 업로드 영역을 클릭하거나 파일을 드래그해주세요.
             </div>
             """, unsafe_allow_html=True)
+    
+    # 매칭 결과가 있으면 다운로드 섹션 표시
+    if (hasattr(st.session_state, 'matching_completed') and 
+        st.session_state.matching_completed and 
+        hasattr(st.session_state, 'matching_results')):
+        
+        st.markdown("---")
+        st.markdown("## 📥 **매칭 결과 다운로드**")
+        
+        result_df = st.session_state.matching_results
+        similarity_df = st.session_state.similarity_results if hasattr(st.session_state, 'similarity_results') else pd.DataFrame()
+        matching_system = st.session_state.matching_system if hasattr(st.session_state, 'matching_system') else None
+        
+        # 다운로드 버튼들
+        download_col1, download_col2, download_col3 = st.columns(3)
+        
+        with download_col1:
+            # 정확 매칭 결과만 다운로드
+            if not result_df.empty:
+                output1 = io.BytesIO()
+                with pd.ExcelWriter(output1, engine='openpyxl') as writer:
+                    result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
+                
+                st.download_button(
+                    label="📊 정확 매칭 결과",
+                    data=output1.getvalue(),
+                    file_name=f"정확매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="main_download_exact"
+                )
+        
+        with download_col2:
+            # 유사도 매칭 결과만 다운로드
+            if not similarity_df.empty and matching_system:
+                filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                temp_filename = f"temp_main_{filename}"
+                
+                try:
+                    matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+                    
+                    with open(temp_filename, 'rb') as f:
+                        file_data = f.read()
+                    
+                    st.download_button(
+                        label="🔍 유사도 매칭 결과",
+                        data=file_data,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="main_download_similarity"
+                    )
+                    
+                    # 임시 파일 정리
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                        
+                except Exception as e:
+                    st.error(f"유사도 결과 준비 중 오류: {str(e)}")
+        
+        with download_col3:
+            # 통합 결과 다운로드
+            if not result_df.empty or not similarity_df.empty:
+                output_combined = io.BytesIO()
+                with pd.ExcelWriter(output_combined, engine='openpyxl') as writer:
+                    if not result_df.empty:
+                        result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
+                    if not similarity_df.empty:
+                        similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
+                
+                st.download_button(
+                    label="📋 **전체 결과 통합**",
+                    data=output_combined.getvalue(),
+                    file_name=f"브랜드매칭_전체결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="main_download_combined"
+                )
+        
+        # 결과 요약
+        if not result_df.empty:
+            exact_matched = len(result_df[pd.to_numeric(result_df['O열(도매가격)'], errors='coerce') > 0]) if 'O열(도매가격)' in result_df.columns else 0
+            similarity_matched = len(similarity_df[similarity_df['매칭_상태'] == '유사매칭']) if not similarity_df.empty and '매칭_상태' in similarity_df.columns else 0
+            
+            st.info(f"✅ **매칭 완료**: 정확 매칭 {exact_matched:,}개, 유사도 매칭 {similarity_matched:,}개")
+        
+        # 새로운 매칭을 위한 초기화 버튼
+        if st.button("🔄 새로운 매칭 시작", use_container_width=True):
+            # 세션 상태 초기화
+            for key in ['matching_results', 'similarity_results', 'matching_system', 'matching_completed']:
+                if key in st.session_state:
+                    del st.session_state[key]
+            st.rerun()
     
     with col2:
         st.markdown("### 📊 시스템 현황")
@@ -291,6 +390,12 @@ def process_matching(uploaded_files, matching_system, file_processor):
         status_text.text("✅ 모든 매칭 완료!")
         progress_bar.progress(100)
         
+        # 결과를 세션 상태에 저장
+        st.session_state.matching_results = result_df
+        st.session_state.similarity_results = similarity_df
+        st.session_state.matching_system = matching_system
+        st.session_state.matching_completed = True
+        
         # 결과 표시
         show_results_with_similarity(result_df, similarity_df, matching_system)
         
@@ -323,20 +428,97 @@ def show_results_with_similarity(result_df, similarity_df, matching_system):
         </div>
         """, unsafe_allow_html=True)
         
+        # 통합 다운로드 버튼 (최상단에 배치)
+        st.markdown("---")
+        st.markdown("### 💾 **전체 결과 다운로드**")
+        
+        download_col1, download_col2, download_col3 = st.columns(3)
+        
+        with download_col1:
+            # 정확 매칭 결과만 다운로드
+            if not result_df.empty:
+                output1 = io.BytesIO()
+                with pd.ExcelWriter(output1, engine='openpyxl') as writer:
+                    result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
+                
+                st.download_button(
+                    label="📊 정확 매칭 결과만",
+                    data=output1.getvalue(),
+                    file_name=f"정확매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_exact_only"
+                )
+        
+        with download_col2:
+            # 유사도 매칭 결과만 다운로드
+            if not similarity_df.empty:
+                filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                temp_filename = f"temp_{filename}"
+                
+                # 임시 파일로 저장하여 스타일 적용
+                try:
+                    matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+                    
+                    with open(temp_filename, 'rb') as f:
+                        file_data = f.read()
+                    
+                    st.download_button(
+                        label="🔍 유사도 매칭 결과만",
+                        data=file_data,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key="download_similarity_only"
+                    )
+                    
+                    # 임시 파일 정리
+                    if os.path.exists(temp_filename):
+                        os.remove(temp_filename)
+                        
+                except Exception as e:
+                    st.error(f"유사도 매칭 결과 준비 중 오류: {str(e)}")
+        
+        with download_col3:
+            # 통합 결과 다운로드 (두 결과를 모두 포함)
+            if not result_df.empty or not similarity_df.empty:
+                output_combined = io.BytesIO()
+                with pd.ExcelWriter(output_combined, engine='openpyxl') as writer:
+                    # 정확 매칭 결과 시트
+                    if not result_df.empty:
+                        result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
+                    
+                    # 유사도 매칭 결과 시트
+                    if not similarity_df.empty:
+                        similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
+                
+                st.download_button(
+                    label="📋 **전체 결과 통합**",
+                    data=output_combined.getvalue(),
+                    file_name=f"브랜드매칭_전체결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="download_combined"
+                )
+        
         # 탭으로 결과 구분
-        tab1, tab2 = st.tabs(["📊 정확 매칭 결과", "🔍 유사도 매칭 결과"])
+        st.markdown("---")
+        tab1, tab2, tab3 = st.tabs(["📊 정확 매칭 결과", "🔍 유사도 매칭 결과", "📈 종합 통계"])
         
         with tab1:
-            show_exact_match_results(result_df)
+            show_exact_match_results_simple(result_df)
         
         with tab2:
-            show_similarity_match_results(similarity_df, matching_system)
+            show_similarity_match_results_simple(similarity_df, matching_system)
+        
+        with tab3:
+            show_combined_statistics(result_df, similarity_df)
             
     except Exception as e:
         st.error(f"❌ 결과 표시 중 오류 발생: {str(e)}")
 
-def show_exact_match_results(result_df):
-    """정확 매칭 결과 표시"""
+def show_exact_match_results_simple(result_df):
+    """정확 매칭 결과 표시 (간소화 버전)"""
     try:
         # 통계 정보
         st.markdown("### 📊 정확 매칭 통계")
@@ -373,29 +555,15 @@ def show_exact_match_results(result_df):
                 use_container_width=True,
                 height=400
             )
-        
-        # 다운로드 버튼
-        st.markdown("---")
-        st.markdown("### 💾 정확 매칭 결과 다운로드")
-        
-        if not result_df.empty:
-            # 엑셀 파일로 변환
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                result_df.to_excel(writer, sheet_name='정확매칭결과', index=False)
-            
-            st.download_button(
-                label="📥 정확 매칭 결과 다운로드 (Excel)",
-                data=output.getvalue(),
-                file_name=f"정확매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
         else:
-            st.info("📭 다운로드할 데이터가 없습니다.")
+            st.info("📭 정확 매칭 결과가 없습니다.")
             
     except Exception as e:
         st.error(f"❌ 정확 매칭 결과 표시 중 오류: {str(e)}")
+
+def show_exact_match_results(result_df):
+    """기존 정확 매칭 결과 표시 (하위 호환성)"""
+    show_exact_match_results_simple(result_df)
 
 def show_similarity_match_results(similarity_df, matching_system):
     """유사도 매칭 결과 표시"""
@@ -475,38 +643,199 @@ def show_similarity_match_results(similarity_df, matching_system):
         - **🔴 매우낮음 (<0.3)**: 유사성 낮음, 수동 확인 필요
         """)
         
-        # 다운로드 버튼
-        st.markdown("---")
-        st.markdown("### 💾 유사도 매칭 결과 다운로드")
+    except Exception as e:
+        st.error(f"❌ 유사도 매칭 결과 표시 중 오류: {str(e)}")
+
+def show_similarity_match_results_simple(similarity_df, matching_system):
+    """유사도 매칭 결과 표시 (간소화 버전)"""
+    try:
+        if similarity_df.empty:
+            st.info("🎯 모든 상품이 정확 매칭되어 유사도 매칭이 필요하지 않습니다!")
+            return
         
-        if not similarity_df.empty:
-            # 엑셀 파일로 변환 (스타일 적용)
-            filename = f"유사도매칭결과_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # 유사도 매칭 통계
+        st.markdown("### 🔍 유사도 매칭 통계")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        # 유사도 매칭 성공 (종합_유사도 >= 0.3)
+        successful_similarity = len(similarity_df[similarity_df['매칭_상태'] == '유사매칭'])
+        failed_similarity = len(similarity_df[similarity_df['매칭_상태'] == '매칭실패'])
+        
+        with col1:
+            st.metric("🔍 유사도 매칭 대상", f"{len(similarity_df):,}개")
+        with col2:
+            st.metric("✅ 유사매칭 성공", f"{successful_similarity:,}개")
+        with col3:
+            st.metric("❌ 완전 매칭 실패", f"{failed_similarity:,}개")
+        with col4:
+            if len(similarity_df) > 0:
+                similarity_rate = (successful_similarity / len(similarity_df)) * 100
+                st.metric("📈 유사매칭률", f"{similarity_rate:.1f}%")
+        
+        # 유사도 분포
+        st.markdown("---")
+        st.markdown("### 📈 유사도 분포")
+        
+        if '종합_유사도' in similarity_df.columns:
+            # 유사도를 숫자로 변환
+            similarity_values = pd.to_numeric(similarity_df['종합_유사도'], errors='coerce')
             
-            # 임시 파일로 저장
-            temp_filename = f"temp_{filename}"
-            matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+            # 구간별 분포
+            high_sim = len(similarity_values[similarity_values >= 0.7])
+            medium_sim = len(similarity_values[(similarity_values >= 0.5) & (similarity_values < 0.7)])
+            low_sim = len(similarity_values[(similarity_values >= 0.3) & (similarity_values < 0.5)])
+            very_low_sim = len(similarity_values[similarity_values < 0.3])
             
-            # 파일 읽어서 다운로드 버튼 생성
-            with open(temp_filename, 'rb') as f:
-                file_data = f.read()
-            
-            st.download_button(
-                label="📥 유사도 매칭 결과 다운로드 (Excel - 스타일 적용)",
-                data=file_data,
-                file_name=filename,
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            
-            # 임시 파일 정리
-            if os.path.exists(temp_filename):
-                os.remove(temp_filename)
-        else:
-            st.info("📭 다운로드할 유사도 매칭 데이터가 없습니다.")
+            dist_col1, dist_col2, dist_col3, dist_col4 = st.columns(4)
+            with dist_col1:
+                st.metric("🟢 높음 (≥0.7)", f"{high_sim}개")
+            with dist_col2:
+                st.metric("🟡 보통 (0.5-0.7)", f"{medium_sim}개")
+            with dist_col3:
+                st.metric("🟠 낮음 (0.3-0.5)", f"{low_sim}개")
+            with dist_col4:
+                st.metric("🔴 매우낮음 (<0.3)", f"{very_low_sim}개")
+        
+        # 결과 미리보기
+        st.markdown("---")
+        st.markdown("### 📋 유사도 매칭 결과 미리보기")
+        
+        # 유사도 높은 순으로 정렬하여 표시
+        display_df = similarity_df.copy()
+        if '종합_유사도' in display_df.columns:
+            display_df['종합_유사도'] = pd.to_numeric(display_df['종합_유사도'], errors='coerce')
+            display_df = display_df.sort_values('종합_유사도', ascending=False)
+        
+        # 처음 10개 행만 표시
+        preview_df = display_df.head(10)
+        st.dataframe(
+            preview_df,
+            use_container_width=True,
+            height=400
+        )
+        
+        # 유사도 매칭 결과 해석 가이드
+        st.markdown("---")
+        st.markdown("### 💡 유사도 매칭 결과 해석")
+        st.markdown("""
+        - **🟢 높음 (≥0.7)**: 매우 유사한 상품, 거의 확실한 매칭
+        - **🟡 보통 (0.5-0.7)**: 유사한 상품, 검토 후 사용 권장
+        - **🟠 낮음 (0.3-0.5)**: 약간 유사한 상품, 신중한 검토 필요
+        - **🔴 매우낮음 (<0.3)**: 유사성 낮음, 수동 확인 필요
+        """)
             
     except Exception as e:
         st.error(f"❌ 유사도 매칭 결과 표시 중 오류: {str(e)}")
+
+def show_combined_statistics(result_df, similarity_df):
+    """종합 통계 표시"""
+    try:
+        st.markdown("### 📈 전체 매칭 종합 통계")
+        
+        # 정확 매칭 통계 계산
+        if 'O열(도매가격)' in result_df.columns:
+            exact_matched = len(result_df[pd.to_numeric(result_df['O열(도매가격)'], errors='coerce') > 0])
+            exact_failed = len(result_df[pd.to_numeric(result_df['O열(도매가격)'], errors='coerce') == 0])
+        else:
+            exact_matched = 0
+            exact_failed = len(result_df)
+        
+        # 유사도 매칭 통계 계산
+        if not similarity_df.empty:
+            similarity_matched = len(similarity_df[similarity_df['매칭_상태'] == '유사매칭'])
+            similarity_failed = len(similarity_df[similarity_df['매칭_상태'] == '매칭실패'])
+        else:
+            similarity_matched = 0
+            similarity_failed = 0
+        
+        # 전체 통계
+        total_products = len(result_df)
+        total_matched = exact_matched + similarity_matched
+        total_failed = similarity_failed  # 완전히 매칭 실패한 것만
+        
+        # 메트릭 표시
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("📦 전체 상품", f"{total_products:,}개")
+        
+        with col2:
+            st.metric("✅ 총 매칭 성공", f"{total_matched:,}개", 
+                     delta=f"정확: {exact_matched} + 유사: {similarity_matched}")
+        
+        with col3:
+            st.metric("❌ 최종 매칭 실패", f"{total_failed:,}개")
+        
+        with col4:
+            if total_products > 0:
+                final_success_rate = (total_matched / total_products) * 100
+                st.metric("🎯 최종 성공률", f"{final_success_rate:.1f}%")
+        
+        # 매칭 방식별 분포 차트
+        st.markdown("---")
+        st.markdown("### 📊 매칭 방식별 분포")
+        
+        # 파이 차트용 데이터 준비
+        chart_data = {
+            '정확 매칭': exact_matched,
+            '유사도 매칭': similarity_matched,
+            '매칭 실패': total_failed
+        }
+        
+        # 차트 표시
+        chart_df = pd.DataFrame(list(chart_data.items()), columns=['매칭 방식', '개수'])
+        chart_df = chart_df[chart_df['개수'] > 0]  # 0개인 항목 제외
+        
+        if not chart_df.empty:
+            st.bar_chart(chart_df.set_index('매칭 방식'))
+        
+        # 세부 분석
+        st.markdown("---")
+        st.markdown("### 🔍 세부 분석")
+        
+        analysis_col1, analysis_col2 = st.columns(2)
+        
+        with analysis_col1:
+            st.markdown("**📊 정확 매칭 분석**")
+            if total_products > 0:
+                exact_rate = (exact_matched / total_products) * 100
+                st.write(f"- 정확 매칭률: {exact_rate:.1f}%")
+                st.write(f"- 정확 매칭 실패: {exact_failed:,}개")
+                
+                if exact_failed > 0:
+                    similarity_recovery_rate = (similarity_matched / exact_failed) * 100 if exact_failed > 0 else 0
+                    st.write(f"- 유사도 매칭 복구율: {similarity_recovery_rate:.1f}%")
+        
+        with analysis_col2:
+            st.markdown("**🔍 유사도 매칭 분석**")
+            if not similarity_df.empty and '종합_유사도' in similarity_df.columns:
+                similarity_values = pd.to_numeric(similarity_df['종합_유사도'], errors='coerce')
+                avg_similarity = similarity_values.mean()
+                max_similarity = similarity_values.max()
+                
+                st.write(f"- 평균 유사도: {avg_similarity:.3f}")
+                st.write(f"- 최고 유사도: {max_similarity:.3f}")
+                
+                high_confidence = len(similarity_values[similarity_values >= 0.7])
+                if len(similarity_df) > 0:
+                    high_conf_rate = (high_confidence / len(similarity_df)) * 100
+                    st.write(f"- 고신뢰도 매칭: {high_confidence}개 ({high_conf_rate:.1f}%)")
+        
+        # 권장사항
+        st.markdown("---")
+        st.markdown("### 💡 결과 활용 권장사항")
+        
+        if total_failed > 0:
+            st.warning(f"⚠️ **{total_failed}개 상품이 매칭되지 않았습니다.** 수동 확인이 필요합니다.")
+        
+        if similarity_matched > 0:
+            st.info(f"🔍 **{similarity_matched}개 상품이 유사도 매칭되었습니다.** 유사도가 높은 순서대로 검토하여 사용하세요.")
+        
+        if exact_matched == total_products:
+            st.success("🎉 **모든 상품이 정확 매칭되었습니다!** 바로 사용 가능합니다.")
+            
+    except Exception as e:
+        st.error(f"❌ 종합 통계 표시 중 오류: {str(e)}")
 
 def show_results(result_df):
     """기존 결과 표시 함수 (하위 호환성)"""
