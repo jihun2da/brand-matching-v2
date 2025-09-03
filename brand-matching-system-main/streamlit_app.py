@@ -53,35 +53,18 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# 초기화 - 속도 최적화 버전
+# 초기화
 @st.cache_resource
 def init_system():
-    """시스템 초기화 (캐시됨) - 속도 최적화 버전"""
+    """시스템 초기화 (캐시됨)"""
     try:
-        with st.spinner("시스템 초기화 중... (최초 실행시 약 10-20초 소요)"):
-            matching_system = BrandMatchingSystem()
-            file_processor = BrandFileProcessor()
-            
-        st.success("✅ 시스템 초기화 완료!")
+        matching_system = BrandMatchingSystem()
+        file_processor = BrandFileProcessor()
         return matching_system, file_processor
     except Exception as e:
         st.error(f"시스템 초기화 중 오류 발생: {str(e)}")
         st.info("기본 모드로 실행합니다.")
         return None, None
-
-@st.cache_data(ttl=300)  # 5분 캐시
-def get_system_stats(matching_system):
-    """시스템 통계 정보 캐시"""
-    try:
-        brand_count = len(matching_system.brand_data) if matching_system.brand_data is not None else 0
-        keyword_count = len(matching_system.keyword_list)
-        return {
-            'brand_count': brand_count,
-            'keyword_count': keyword_count,
-            'cache_size': len(matching_system._normalized_cache) if hasattr(matching_system, '_normalized_cache') else 0
-        }
-    except:
-        return {'brand_count': 0, 'keyword_count': 0, 'cache_size': 0}
 
 def main():
     matching_system, file_processor = init_system()
@@ -112,25 +95,8 @@ def main():
     else:
         show_usage_page()
 
-@st.cache_data(ttl=60)  # 1분 캐시
-def process_file_cached(file_content, file_name, matching_system, file_processor):
-    """파일 처리 캐시 함수"""
-    try:
-        # 파일 내용을 기반으로 처리
-        import hashlib
-        file_hash = hashlib.md5(file_content).hexdigest()
-        
-        with st.spinner(f"파일 처리 중... ({file_name})"):
-            # 실제 파일 처리 로직
-            result_df = file_processor.process_uploaded_file(file_content, file_name, matching_system)
-            
-        return result_df, file_hash
-    except Exception as e:
-        st.error(f"파일 처리 중 오류 발생: {str(e)}")
-        return None, None
-
 def show_matching_page(matching_system, file_processor):
-    """매칭 처리 페이지 - 속도 최적화 버전"""
+    """매칭 처리 페이지"""
     
     # 두 개의 컬럼으로 나누기
     col1, col2 = st.columns([2, 1])
