@@ -433,8 +433,15 @@ def process_matching(uploaded_files, matching_system, file_processor):
         status_text.text("📋 데이터를 변환하는 중...")
         progress_bar.progress(60)
         
+        # 변환 시작 시간 기록
+        import time
+        convert_start = time.time()
+        st.info(f"🔄 변환 시작: {len(combined_df):,}개 행 처리 중...")
+        
         sheet2_df = matching_system.convert_sheet1_to_sheet2(combined_df)
-        st.info(f"🔄 {len(sheet2_df)}개 행으로 변환했습니다.")
+        
+        convert_elapsed = time.time() - convert_start
+        st.success(f"✅ 변환 완료! {len(sheet2_df):,}개 행 - 소요시간: {convert_elapsed:.1f}초")
         
         # 4단계: 정확 매칭 처리
         status_text.text("🎯 정확 매칭을 수행하는 중...")

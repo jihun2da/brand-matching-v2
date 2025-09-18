@@ -684,8 +684,11 @@ class BrandMatchingSystem:
         pass
     
     def convert_sheet1_to_sheet2(self, sheet1_df: pd.DataFrame) -> pd.DataFrame:
-        """Sheet1 형식을 Sheet2 형식으로 변환 - 병렬 처리 최적화 버전"""
-        logger.info("Sheet1 -> Sheet2 변환 시작 (병렬 처리 모드)")
+        """Sheet1 형식을 Sheet2 형식으로 변환 - 성능 최적화 버전"""
+        import time
+        start_time = time.time()
+        
+        logger.info(f"Sheet1 -> Sheet2 변환 시작: {len(sheet1_df):,}개 행 처리")
 
         # Sheet2 형식의 23개 컬럼 생성
         sheet2_columns = [
@@ -696,14 +699,26 @@ class BrandMatchingSystem:
             'U열(아이디)', 'V열(배송메세지)', 'W열(금액)'
         ]
 
-        sheet2_df = pd.DataFrame(columns=sheet2_columns)
-
         if sheet1_df.empty:
             logger.warning("업로드된 데이터가 없습니다")
-            return sheet2_df
+            return pd.DataFrame(columns=sheet2_columns)
+
+        # 리스트로 모든 행 데이터를 수집 (성능 최적화)
+        sheet2_rows = []
+        total_rows = len(sheet1_df)
 
         # Sheet1의 데이터를 Sheet2로 매핑
-        for i, row in sheet1_df.iterrows():
+        for i, (idx, row) in enumerate(sheet1_df.iterrows()):
+            # 진행률 표시 (1000개마다)
+            if i % 1000 == 0 and i > 0:
+                elapsed = time.time() - start_time
+                progress = (i / total_rows) * 100
+                logger.info(f"변환 진행률: {i:,}/{total_rows:,} ({progress:.1f}%) - 경과시간: {elapsed:.1f}초")
+                
+                # 타임아웃 체크 (10분)
+                if elapsed > 600:
+                    logger.error("데이터 변환 타임아웃 (10분 초과)")
+                    break
             sheet2_row = {}
             
             # 기본값 설정
@@ -840,10 +855,14 @@ class BrandMatchingSystem:
             sheet2_row['O열(도매가격)'] = 0
             sheet2_row['W열(금액)'] = 0
             
-            # DataFrame에 추가
-            sheet2_df = pd.concat([sheet2_df, pd.DataFrame([sheet2_row])], ignore_index=True)
+            # 리스트에 추가 (성능 최적화)
+            sheet2_rows.append(sheet2_row)
 
-        logger.info(f"Sheet2 변환 완료: {len(sheet2_df)}개 행")
+        # 모든 행을 한 번에 DataFrame으로 생성 (성능 최적화)
+        sheet2_df = pd.DataFrame(sheet2_rows, columns=sheet2_columns)
+        
+        total_elapsed = time.time() - start_time
+        logger.info(f"Sheet2 변환 완료: {len(sheet2_df):,}개 행 - 소요시간: {total_elapsed:.1f}초")
         return sheet2_df
 
     def extract_size(self, text: str) -> str:
