@@ -530,7 +530,10 @@ class BrandMatchingSystem:
         return color, size
 
     def find_similar_products_for_failed_matches(self, failed_products: List[Dict]) -> pd.DataFrame:
-        """매칭 실패한 상품들에 대해 유사도 기반 매칭 수행"""
+        """매칭 실패한 상품들에 대해 유사도 기반 매칭 수행 - 성능 최적화"""
+        import time
+        start_time = time.time()
+        
         logger.info(f"매칭 실패 상품 {len(failed_products)}개에 대해 유사도 매칭 시작")
         
         if self.brand_data is None or self.brand_data.empty:
@@ -538,8 +541,19 @@ class BrandMatchingSystem:
             return pd.DataFrame()
         
         results = []
+        total_failed = len(failed_products)
         
         for i, failed_product in enumerate(failed_products):
+            # 진행률 표시 (10개마다)
+            if i % 10 == 0 and i > 0:
+                elapsed = time.time() - start_time
+                progress = (i / total_failed) * 100
+                logger.info(f"유사도 매칭 진행률: {i}/{total_failed} ({progress:.1f}%) - 경과시간: {elapsed:.1f}초")
+                
+                # 타임아웃 체크 (10분)
+                if elapsed > 600:
+                    logger.error("유사도 매칭 타임아웃 (10분 초과)")
+                    break
             logger.debug(f"유사도 매칭 진행: {i+1}/{len(failed_products)}")
             
             # 실패한 상품 정보 추출
@@ -554,15 +568,38 @@ class BrandMatchingSystem:
             best_match = None
             best_score = 0.0
             
-            # 브랜드 데이터에서 유사한 상품 찾기
-            for _, brand_row in self.brand_data.iterrows():
+            # 브랜드 데이터에서 유사한 상품 찾기 (성능 최적화)
+            # 1. 브랜드 필터링으로 검색 범위 축소
+            if brand:
+                brand_filtered = self.brand_data[
+                    self.brand_data['브랜드'].str.strip().str.lower().str.contains(brand.lower(), na=False) |
+                    self.brand_data['브랜드'].str.strip().str.lower() == brand.lower()
+                ]
+            else:
+                brand_filtered = self.brand_data.head(1000)  # 브랜드가 없으면 상위 1000개만
+            
+            # 2. 빈 결과면 전체에서 상위 500개만 사용
+            if brand_filtered.empty:
+                brand_filtered = self.brand_data.head(500)
+            
+            # 3. 너무 많으면 상위 1000개로 제한
+            if len(brand_filtered) > 1000:
+                brand_filtered = brand_filtered.head(1000)
+            
+            logger.debug(f"유사도 매칭 대상: {len(brand_filtered)}개 상품")
+            
+            processed_count = 0
+            for _, brand_row in brand_filtered.iterrows():
+                processed_count += 1
+                
+                # 처리 개수 제한 (성능 최적화)
+                if processed_count > 500:
+                    logger.debug(f"처리 개수 제한 도달: {processed_count}개")
+                    break
+                
                 brand_brand = str(brand_row.get('브랜드', '')).strip()
                 brand_product = str(brand_row.get('상품명', '')).strip()
                 brand_options = str(brand_row.get('옵션입력', '')).strip()
-                
-                # 브랜드 일치 확인 (브랜드가 다르면 스킵)
-                if brand and brand_brand and brand.lower() != brand_brand.lower():
-                    continue
                 
                 # 상품명 유사도 계산
                 brand_normalized = self.normalize_product_name(brand_product)
@@ -666,7 +703,9 @@ class BrandMatchingSystem:
         if not result_df.empty:
             result_df = result_df.sort_values('종합_유사도', ascending=False)
         
-        logger.info(f"유사도 매칭 완료: {len(result_df)}개 결과")
+        total_elapsed = time.time() - start_time
+        successful_matches = len(result_df[result_df['매칭_상태'] == '유사매칭']) if not result_df.empty else 0
+        logger.info(f"유사도 매칭 완료: {len(result_df)}개 결과 ({successful_matches}개 성공) - 소요시간: {total_elapsed:.1f}초")
         return result_df
 
     def _process_batch(self, batch_data):

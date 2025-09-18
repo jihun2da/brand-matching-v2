@@ -463,8 +463,15 @@ def process_matching(uploaded_files, matching_system, file_processor):
             status_text.text(f"🔍 매칭 실패한 {len(failed_products)}개 상품에 대해 유사도 매칭 중...")
             progress_bar.progress(85)
             
+            # 유사도 매칭 시작 시간 기록
+            similarity_start = time.time()
+            st.info(f"🔍 유사도 매칭 시작: {len(failed_products):,}개 실패 상품 처리 중...")
+            
             similarity_df = matching_system.find_similar_products_for_failed_matches(failed_products)
-            st.info(f"🎯 유사도 매칭 완료: {len(similarity_df)}개 결과")
+            
+            similarity_elapsed = time.time() - similarity_start
+            successful_similarity = len(similarity_df[similarity_df['매칭_상태'] == '유사매칭']) if not similarity_df.empty else 0
+            st.success(f"✅ 유사도 매칭 완료! {successful_similarity:,}개 성공 - 소요시간: {similarity_elapsed:.1f}초")
         
         # 6단계: 완료
         status_text.text("✅ 모든 매칭 완료!")
