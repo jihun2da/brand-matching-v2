@@ -879,6 +879,9 @@ class BrandMatchingSystem:
 
     def match_row(self, brand: str, product: str, size: str, color: str = "") -> Tuple[str, str, str, bool]:
         """브랜드, 상품명, 사이즈, 색상으로 매칭하여 공급가, 중도매, 브랜드+상품명, 매칭성공여부 반환"""
+        import time
+        start_time = time.time()
+        
         brand = str(brand).strip()
         product = str(product).strip()
         size = str(size).strip().lower()
@@ -891,15 +894,25 @@ class BrandMatchingSystem:
 
         if self.brand_data is None or self.brand_data.empty:
             logger.warning("브랜드 데이터가 없습니다")
-            return "매칭 실패", "", ""
+            return "매칭 실패", "", "", False
 
         # 매칭 후보들을 저장할 리스트 (정확도 순으로 정렬하기 위함)
         matching_candidates = []
+        
+        # 브랜드 필터링으로 검색 범위 축소
+        brand_filtered_data = self.brand_data[self.brand_data['브랜드'].str.strip() == brand]
+        if brand_filtered_data.empty:
+            logger.debug(f"브랜드 '{brand}'에 해당하는 데이터가 없습니다")
+            return "매칭 실패", "", "", False
+        
+        logger.debug(f"브랜드 '{brand}' 필터링 결과: {len(brand_filtered_data)}개 상품")
 
-        for _, row in self.brand_data.iterrows():
-            # 1. 브랜드 정확히 일치 확인
-            if str(row['브랜드']).strip() != brand:
-                continue
+        for _, row in brand_filtered_data.iterrows():
+            # 타임아웃 체크 (단일 행 매칭이 5초 초과 시 중단)
+            if time.time() - start_time > 5:
+                logger.warning(f"매칭 타임아웃: 브랜드='{brand}', 상품='{product}'")
+                break
+            # 브랜드는 이미 필터링되었으므로 생략
 
             # 2. 상품명 포함 관계 확인 (정규화된 상품명과 비교)
             row_product = self.normalize_product_name(str(row['상품명']).strip())
@@ -1038,6 +1051,7 @@ class BrandMatchingSystem:
 
     def process_matching(self, sheet2_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         """Sheet2 데이터에 대해 매칭 수행하고 매칭 실패한 상품들 반환"""
+        import time
         logger.info("매칭 처리 시작")
 
         if sheet2_df.empty:
@@ -1047,8 +1061,23 @@ class BrandMatchingSystem:
         success_count = 0
         total_count = len(sheet2_df)
         failed_products = []  # 매칭 실패한 상품들
+        start_time = time.time()
+        
+        logger.info(f"총 {total_count:,}개 행 처리 시작")
 
         for idx, row in sheet2_df.iterrows():
+            # 진행률 표시 (100개마다)
+            current_index = idx + 1 if isinstance(idx, int) else len([i for i in sheet2_df.index if i <= idx])
+            if current_index % 100 == 0:
+                elapsed_time = time.time() - start_time
+                progress = (current_index / total_count) * 100
+                logger.info(f"진행률: {current_index:,}/{total_count:,} ({progress:.1f}%) - 경과시간: {elapsed_time:.1f}초")
+                
+                # 타임아웃 체크 (30분)
+                if elapsed_time > 1800:  # 30분
+                    logger.error("매칭 처리 타임아웃 (30분 초과)")
+                    break
+            
             # 브랜드, 상품명, 사이즈 추출
             brand = str(row.get('H열(브랜드)', '')).strip()
             product = str(row.get('I열(상품명)', '')).strip()
@@ -1063,8 +1092,19 @@ class BrandMatchingSystem:
                 sheet2_df.at[idx, 'W열(금액)'] = 0
                 continue
 
-            # 매칭 수행
-            공급가, 중도매, 브랜드상품명, success = self.match_row(brand, product, size, color)
+            # 매칭 수행 (타임아웃 적용)
+            try:
+                row_start_time = time.time()
+                공급가, 중도매, 브랜드상품명, success = self.match_row(brand, product, size, color)
+                row_elapsed = time.time() - row_start_time
+                
+                # 단일 행 처리가 10초를 초과하면 경고
+                if row_elapsed > 10:
+                    logger.warning(f"행 {idx} 처리 시간 초과: {row_elapsed:.1f}초 (브랜드: {brand}, 상품: {product})")
+                
+            except Exception as e:
+                logger.error(f"행 {idx} 매칭 중 오류: {e} (브랜드: {brand}, 상품: {product})")
+                공급가, 중도매, 브랜드상품명, success = "매칭 실패", "", "", False
 
             # 결과 저장
             if success and 공급가 != "매칭 실패":
@@ -1099,9 +1139,10 @@ class BrandMatchingSystem:
                 sheet2_df.at[idx, 'O열(도매가격)'] = 0
                 sheet2_df.at[idx, 'W열(금액)'] = 0
 
+        total_elapsed = time.time() - start_time
         success_rate = (success_count / total_count * 100) if total_count > 0 else 0
-        logger.info(f"매칭 완료: {success_count}/{total_count} ({success_rate:.1f}%)")
-        logger.info(f"매칭 실패: {len(failed_products)}개 상품")
+        logger.info(f"매칭 완료: {success_count:,}/{total_count:,} ({success_rate:.1f}%) - 총 소요시간: {total_elapsed:.1f}초")
+        logger.info(f"매칭 실패: {len(failed_products):,}개 상품")
 
         return sheet2_df, failed_products
 

@@ -440,7 +440,15 @@ def process_matching(uploaded_files, matching_system, file_processor):
         status_text.text("🎯 정확 매칭을 수행하는 중...")
         progress_bar.progress(70)
         
+        # 매칭 시작 시간 기록
+        import time
+        matching_start = time.time()
+        st.info(f"⏰ 매칭 시작: {len(sheet2_df):,}개 상품 처리 예상시간 약 {len(sheet2_df)//100:.0f}분")
+        
         result_df, failed_products = matching_system.process_matching(sheet2_df)
+        
+        matching_elapsed = time.time() - matching_start
+        st.success(f"✅ 정확 매칭 완료! 소요시간: {matching_elapsed:.1f}초")
         
         # 5단계: 유사도 매칭 처리 (매칭 실패한 상품들)
         similarity_df = pd.DataFrame()
