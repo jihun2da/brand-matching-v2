@@ -122,8 +122,11 @@ class BrandSheetsAPI:
                 
                 # 최종 중복 제거 및 정리
                 logger.info("최종 데이터 정리 중...")
+                before_dedup = len(final_df)
                 final_df = final_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+                after_dedup = len(final_df)
                 
+                logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
                 logger.info(f"대용량 데이터 처리 완료: {len(final_df):,}개 상품")
                 return final_df
             else:
@@ -136,13 +139,29 @@ class BrandSheetsAPI:
     
     def _process_normal_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
         """일반 크기 데이터셋 처리"""
-        return self._process_chunk(df)
+        logger.info("일반 크기 데이터셋 처리 모드")
+        processed_df = self._process_chunk(df)
+        
+        if not processed_df.empty:
+            # 중복 제거
+            before_dedup = len(processed_df)
+            processed_df = processed_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+            after_dedup = len(processed_df)
+            
+            logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
+            logger.info(f"일반 데이터 처리 완료: {len(processed_df):,}개 상품")
+        
+        return processed_df
     
     def _process_chunk(self, chunk: pd.DataFrame) -> pd.DataFrame:
         """개별 청크 처리"""
         try:
             if len(chunk.columns) < 5:
+                logger.warning(f"컬럼 수 부족: {len(chunk.columns)}개 (최소 5개 필요)")
                 return pd.DataFrame()
+            
+            original_count = len(chunk)
+            logger.info(f"청크 원시 데이터: {original_count:,}개")
             
             # 필요한 컬럼들 추출 (메모리 효율적)
             brand_data = pd.DataFrame()
@@ -152,16 +171,36 @@ class BrandSheetsAPI:
             brand_data['공급가'] = pd.to_numeric(chunk.iloc[:, 3], errors='coerce').fillna(0).astype('float32')  # float32 사용
             brand_data['옵션입력'] = chunk.iloc[:, 4].fillna('').astype('string')
             
-            # 빈 데이터 제거 (메모리 효율적)
+            # 필터링 전 데이터 상태 분석
+            empty_brand = (brand_data['브랜드'].str.strip() == '').sum()
+            nan_brand = (brand_data['브랜드'] == 'nan').sum()
+            header_brand = (brand_data['브랜드'] == '브랜드').sum()
+            empty_product = (brand_data['상품명'].str.strip() == '').sum()
+            header_product = (brand_data['상품명'] == '상품명').sum()
+            
+            logger.info(f"필터링 전 분석 - 빈 브랜드: {empty_brand}, nan 브랜드: {nan_brand}, 헤더 브랜드: {header_brand}")
+            logger.info(f"필터링 전 분석 - 빈 상품명: {empty_product}, 헤더 상품명: {header_product}")
+            
+            # 빈 데이터 제거 (완화된 조건)
             mask = (
                 (brand_data['브랜드'].str.strip() != '') & 
                 (brand_data['브랜드'] != 'nan') &
-                (brand_data['브랜드'] != '브랜드') &
+                (brand_data['브랜드'].str.lower() != '브랜드') &  # 대소문자 구분 없이
                 (brand_data['상품명'].str.strip() != '') &
-                (brand_data['상품명'] != '상품명')
+                (brand_data['상품명'].str.lower() != '상품명') &  # 대소문자 구분 없이
+                (~brand_data['브랜드'].isna()) &  # NaN 값 제외
+                (~brand_data['상품명'].isna())   # NaN 값 제외
             )
             
             brand_data = brand_data[mask]
+            filtered_count = len(brand_data)
+            
+            logger.info(f"필터링 후: {filtered_count:,}개 (제거된 항목: {original_count - filtered_count:,}개)")
+            
+            # 샘플 데이터 확인 (처음 3개)
+            if not brand_data.empty:
+                sample_data = brand_data.head(3)[['브랜드', '상품명']].to_dict('records')
+                logger.info(f"샘플 데이터: {sample_data}")
             
             return brand_data
             
