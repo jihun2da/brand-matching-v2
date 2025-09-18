@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-브랜드 매칭 시스템 - 속도 최적화 버전
+브랜드 매칭 시스템 - 속도 최적화 및 메모리 최적화 버전
 """
 
 import pandas as pd
 import re
 import logging
 import os
+import gc
 from typing import List, Dict, Tuple
 from functools import lru_cache
 import concurrent.futures
@@ -24,16 +25,19 @@ from brand_sheets_api import brand_sheets_api
 logger = logging.getLogger(__name__)
 
 class BrandMatchingSystem:
-    """브랜드 매칭 시스템 - 속도 최적화 버전"""
+    """
+    브랜드 매칭 시스템 - 메모리 최적화 버전
+    """
 
     def __init__(self):
         self.brand_data = None
         self.keyword_list = []
         
-        # 속도 최적화를 위한 캐시와 컴파일된 정규식
+        # 메모리 최적화를 위한 캐시 크기 조정
         self._normalized_cache = {}
         self._cache_lock = Lock()
         self._compiled_patterns = {}
+        self._max_cache_size = 1000  # 캐시 크기 제한
         
         # 데이터 로드
         self.load_brand_data()
@@ -42,37 +46,35 @@ class BrandMatchingSystem:
 
     def _precompile_patterns(self):
         """자주 사용되는 정규식 패턴들을 미리 컴파일"""
-        logger.info("정규식 패턴 컴파일 중...")
+        patterns = {
+            'parentheses': r'\([^)]*\)',
+            'brackets': r'\[[^\]]*\]',
+            'braces': r'\{[^}]*\}',
+            'special_chars': r'[^\w\s가-힣]',
+            'multiple_spaces': r'\s+',
+            'size_pattern': r'사이즈\s*[\{\[\(]([^}\]\)]+)[\}\]\)]',
+            'color_pattern': r'색상\s*[\{\[\(]([^}\]\)]+)[\}\]\)]',
+            'option_split': r'[,/\s]+',
+        }
         
-        # 기본 패턴들
-        self._compiled_patterns.update({
-            'parentheses': re.compile(r'\([^)]*\)', re.IGNORECASE),
-            'multiple_spaces': re.compile(r'\s+'),
-            'comma_spaces': re.compile(r'\s*,\s*'),
-            'multiple_commas': re.compile(r',+'),
-            'korean_alpha_num': re.compile(r'[가-힣a-zA-Z0-9]'),
-            'word_boundary': re.compile(r'^[a-zA-Z0-9가-힣\s]+$'),
-            
-            # 사이즈 관련 패턴들 (미리 컴파일)
-            'size_s_xl': re.compile(r'\([sS]~[xX][lL]\)', re.IGNORECASE),
-            'size_s_xl_dash': re.compile(r'\([sS]-[xX][lL]\)', re.IGNORECASE),
-            'size_xs_xl': re.compile(r'\([xX][sS]~[xX][lL]\)', re.IGNORECASE),
-            'size_xs_xl_dash': re.compile(r'\([xX][sS]-[xX][lL]\)', re.IGNORECASE),
-            'size_m_jxl': re.compile(r'\([mM]~[jJ][xX][lL]\)', re.IGNORECASE),
-            'size_m_jxl_dash': re.compile(r'\([mM]-[jJ][xX][lL]\)', re.IGNORECASE),
-            'size_numbers': re.compile(r'\([0-9]+[~-][0-9]+\)', re.IGNORECASE),
-            'size_js_patterns': re.compile(r'\([jJ][sS][~-][jJ][xXlLmM]+\)', re.IGNORECASE),
-            
-            # 옵션 파싱 패턴들
-            'color_keywords': re.compile(r'(?:색상|컬러|Color)', re.IGNORECASE),
-            'size_keywords': re.compile(r'(?:사이즈|Size)', re.IGNORECASE),
-            'slash_pattern': re.compile(r'^([^/]+)/([^/]+)$'),
-            'dash_pattern': re.compile(r'^([^-]+)-([^-]+)$'),
-            'size_check': re.compile(r'[0-9]|[SMLX]', re.IGNORECASE),
-            'exact_size': re.compile(r'^[SMLX]$|^[0-9]+$', re.IGNORECASE),
-        })
+        for name, pattern in patterns.items():
+            self._compiled_patterns[name] = re.compile(pattern)
         
-        logger.info(f"정규식 패턴 {len(self._compiled_patterns)}개 컴파일 완료")
+        logger.info(f"정규식 패턴 {len(patterns)}개 컴파일 완료")
+
+    def _clean_cache(self):
+        """캐시 크기가 제한을 초과할 때 정리"""
+        with self._cache_lock:
+            if len(self._normalized_cache) > self._max_cache_size:
+                # 오래된 항목의 절반 제거
+                items_to_remove = len(self._normalized_cache) // 2
+                keys_to_remove = list(self._normalized_cache.keys())[:items_to_remove]
+                for key in keys_to_remove:
+                    del self._normalized_cache[key]
+                
+                # 메모리 정리
+                gc.collect()
+                logger.info(f"캐시 정리 완료: {items_to_remove}개 항목 제거")
 
     def calculate_string_similarity(self, str1: str, str2: str) -> float:
         """문자열 유사도 계산 (0.0 ~ 1.0)"""
@@ -175,11 +177,12 @@ class BrandMatchingSystem:
         
         return base_similarity
 
-    @lru_cache(maxsize=1000)
+    @lru_cache(maxsize=200)
     def _get_keyword_pattern(self, keyword: str) -> re.Pattern:
         """키워드별 정규식 패턴을 캐시와 함께 생성"""
         escaped_keyword = re.escape(keyword)
         
+        # 컴파일된 패턴 사용
         if self._compiled_patterns['word_boundary'].match(keyword):
             return re.compile(r'\b' + escaped_keyword + r'\b', re.IGNORECASE)
         else:
@@ -267,80 +270,52 @@ class BrandMatchingSystem:
             return words[2]
         return ""
 
-    def normalize_product_name(self, product_name: str) -> str:
-        """상품명 정규화 - 캐시 및 최적화 버전"""
-        if not product_name or pd.isna(product_name):
+    def normalize_product_name(self, name: str) -> str:
+        """상품명 정규화 - 캐시 및 메모리 최적화 버전"""
+        if not name or pd.isna(name):
             return ""
         
-        original = str(product_name).strip()
+        name_str = str(name).strip()
+        if not name_str:
+            return ""
         
         # 캐시 확인
         with self._cache_lock:
-            if original in self._normalized_cache:
-                return self._normalized_cache[original]
+            if name_str in self._normalized_cache:
+                return self._normalized_cache[name_str]
         
-        normalized = original
-        
-        # 1단계: * 기호로 감싸진 패턴 우선 처리 (최적화)
-        star_keywords = [kw for kw in self.keyword_list 
-                        if kw.startswith('*') and kw.endswith('*') and len(kw) > 2]
-        
-        for keyword in star_keywords:
-            variations = [
-                keyword,
-                keyword.replace('~', '-'),
-                keyword.replace('-', '~'),
-            ]
+        # 정규화 처리
+        try:
+            normalized = name_str.lower()
             
-            for variation in variations:
-                if variation in normalized:
-                    normalized = normalized.replace(variation, '')
-                    break
-        
-        # 2단계: 일반 키워드 제거 (컴파일된 정규식 사용)
-        regular_keywords = [kw for kw in self.keyword_list 
-                           if not (kw.startswith('*') and kw.endswith('*'))]
-        
-        for keyword in regular_keywords:
-            if not keyword:
-                continue
-                
-            # 괄호와 함께 키워드 제거
-            parentheses_pattern = re.compile(r'\(' + re.escape(keyword) + r'\)', re.IGNORECASE)
-            normalized = parentheses_pattern.sub('', normalized)
+            # 컴파일된 패턴 사용
+            normalized = self._compiled_patterns['parentheses'].sub('', normalized)
+            normalized = self._compiled_patterns['brackets'].sub('', normalized)
+            normalized = self._compiled_patterns['braces'].sub('', normalized)
+            normalized = self._compiled_patterns['special_chars'].sub(' ', normalized)
+            normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized)
+            normalized = normalized.strip()
             
-            # 단독 키워드 제거 (캐시된 패턴 사용)
-            keyword_pattern = self._get_keyword_pattern(keyword)
-            normalized = keyword_pattern.sub('', normalized)
-        
-        # 3단계: 미리 컴파일된 패턴으로 유연한 패턴 제거
-        pattern_keys = ['size_s_xl', 'size_s_xl_dash', 'size_xs_xl', 'size_xs_xl_dash',
-                       'size_m_jxl', 'size_m_jxl_dash', 'size_numbers', 'size_js_patterns']
-        
-        for pattern_key in pattern_keys:
-            normalized = self._compiled_patterns[pattern_key].sub('', normalized)
-        
-        # 4단계: 텍스트 정리 (컴파일된 정규식 사용)
-        normalized = self._compiled_patterns['comma_spaces'].sub(',', normalized)
-        normalized = self._compiled_patterns['multiple_commas'].sub(',', normalized)
-        normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized)
-        normalized = normalized.strip(',').strip()
-        
-        # 결과 검증
-        if len(normalized) < 2 or not self._compiled_patterns['korean_alpha_num'].search(normalized):
-            normalized = original
-        
-        result = normalized.lower()
-        
-        # 캐시에 저장 (메모리 관리를 위해 크기 제한)
-        with self._cache_lock:
-            if len(self._normalized_cache) < 10000:  # 최대 10,000개 캐시
-                self._normalized_cache[original] = result
-        
-        logger.debug(f"상품명 정규화: '{original}' → '{result}'")
-        return result
+            # 키워드 제거 (최적화된 방식)
+            if self.keyword_list:
+                for keyword in self.keyword_list:
+                    if keyword in normalized:
+                        normalized = normalized.replace(keyword, ' ')
+                normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized).strip()
+            
+            # 캐시에 저장 (크기 제한 확인)
+            with self._cache_lock:
+                if len(self._normalized_cache) >= self._max_cache_size:
+                    self._clean_cache()
+                self._normalized_cache[name_str] = normalized
+            
+            return normalized
+            
+        except Exception as e:
+            logger.error(f"상품명 정규화 실패 ({name_str}): {e}")
+            return name_str.lower()
 
-    @lru_cache(maxsize=500)
+    @lru_cache(maxsize=200)
     def parse_color_variants(self, color_text: str) -> tuple:
         """색상 텍스트에서 모든 가능한 변형을 추출 - 캐시 버전"""
         if not color_text or pd.isna(color_text):
@@ -369,7 +344,7 @@ class BrandMatchingSystem:
         
         return tuple(sorted(variants))
 
-    @lru_cache(maxsize=500)
+    @lru_cache(maxsize=200)
     def parse_size_variants(self, size_text: str) -> tuple:
         """사이즈 텍스트에서 모든 가능한 변형을 추출 - 캐시 버전"""
         if not size_text or pd.isna(size_text):

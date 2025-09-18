@@ -295,19 +295,74 @@ def show_matching_page(matching_system, file_processor):
         
         with brand_col2:
             if st.button("🔄", help="브랜드 데이터 새로고침", use_container_width=True):
-                with st.spinner("업데이트 중..."):
-                    try:
-                        # 캐시 클리어 및 데이터 새로고침
+                # 진행률 표시를 위한 플레이스홀더
+                progress_placeholder = st.empty()
+                status_placeholder = st.empty()
+                
+                try:
+                    # 메모리 정리
+                    import gc
+                    gc.collect()
+                    
+                    with progress_placeholder.container():
+                        progress_bar = st.progress(0)
+                        status_text = st.text("데이터 로드 준비 중...")
+                        
+                        # 1단계: 캐시 클리어
+                        progress_bar.progress(10)
+                        status_text.text("캐시 정리 중...")
                         st.cache_resource.clear()
+                        
+                        # 2단계: 데이터 로드 시작
+                        progress_bar.progress(30)
+                        status_text.text("브랜드 데이터 로드 중...")
+                        
+                        # 3단계: 실제 데이터 로드
                         matching_system.load_brand_data()
-                        st.success("✅ 업데이트 완료!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ 업데이트 실패: {str(e)}")
+                        progress_bar.progress(80)
+                        status_text.text("데이터 처리 완료...")
+                        
+                        # 4단계: 완료
+                        progress_bar.progress(100)
+                        status_text.text("업데이트 완료!")
+                    
+                    # 성공 메시지 표시
+                    progress_placeholder.empty()
+                    status_placeholder.success("✅ 브랜드 데이터 업데이트 완료!")
+                    
+                    # 잠시 후 페이지 새로고침
+                    import time
+                    time.sleep(1)
+                    st.rerun()
+                    
+                except Exception as e:
+                    progress_placeholder.empty()
+                    status_placeholder.error(f"❌ 업데이트 실패: {str(e)}")
+                    
+                    # 상세 오류 정보 표시
+                    if "메모리" in str(e).lower() or "memory" in str(e).lower():
+                        st.warning("⚠️ 메모리 부족으로 인한 오류일 수 있습니다. 잠시 후 다시 시도해주세요.")
+                    elif "timeout" in str(e).lower():
+                        st.warning("⚠️ 네트워크 타임아웃입니다. 인터넷 연결을 확인하고 다시 시도해주세요.")
+                    else:
+                        st.error(f"🔍 상세 오류: {type(e).__name__}")
         
         # 키워드 정보
         if hasattr(matching_system, 'keyword_list') and matching_system.keyword_list:
             st.metric("🔍 제외 키워드", f"{len(matching_system.keyword_list)}개")
+        
+        # 메모리 사용량 정보
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            memory_mb = process.memory_info().rss / 1024 / 1024
+            st.metric("💾 메모리 사용량", f"{memory_mb:.0f} MB")
+        except ImportError:
+            # psutil이 없는 경우 캐시 정보만 표시
+            if hasattr(matching_system, '_normalized_cache'):
+                cache_size = len(matching_system._normalized_cache)
+                st.metric("🗄️ 캐시 항목", f"{cache_size:,}개")
         
         # 마지막 업데이트 시간 표시
         from datetime import datetime
