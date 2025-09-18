@@ -21,6 +21,7 @@ class BrandSheetsAPI:
         self.brand_sheet_id = "14Pmz5-bFVPSPbfoKi5BfQWa8qVMVNDqxEQVmhT9wyuU"
         self.gid = "1834709463"  # 시트 탭 ID
         self.chunk_size = 5000  # 청크 크기 설정 (메모리 절약)
+        self.preserve_data = True  # 데이터 보존 모드 (더 관대한 필터링)
         
     def read_brand_matching_data(self) -> pd.DataFrame:
         """브랜드매칭시트에서 매칭 데이터 읽기 (공개 시트) - 메모리 최적화"""
@@ -29,6 +30,7 @@ class BrandSheetsAPI:
             csv_url = f"https://docs.google.com/spreadsheets/d/{self.brand_sheet_id}/export?format=csv&gid={self.gid}"
             
             logger.info(f"브랜드매칭시트에서 데이터 읽기 시도: {self.brand_sheet_id}")
+            logger.info(f"데이터 보존 모드: {'활성화' if self.preserve_data else '비활성화'}")
             
             # CSV 데이터 다운로드 (타임아웃 증가)
             response = requests.get(csv_url, timeout=60)
@@ -120,10 +122,19 @@ class BrandSheetsAPI:
                 del processed_chunks
                 gc.collect()
                 
-                # 최종 중복 제거 및 정리
+                # 최종 스마트 중복 제거 및 정리
                 logger.info("최종 데이터 정리 중...")
                 before_dedup = len(final_df)
-                final_df = final_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+                
+                if self.preserve_data:
+                    # 관대한 중복 제거 (브랜드+상품명만으로 중복 판단)
+                    final_df = final_df.drop_duplicates(subset=['브랜드', '상품명'], keep='first')
+                    logger.info("관대한 중복 제거 적용 (브랜드+상품명 기준)")
+                else:
+                    # 엄격한 중복 제거 (브랜드+상품명+옵션입력)
+                    final_df = final_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+                    logger.info("엄격한 중복 제거 적용 (브랜드+상품명+옵션 기준)")
+                
                 after_dedup = len(final_df)
                 
                 logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
@@ -143,9 +154,18 @@ class BrandSheetsAPI:
         processed_df = self._process_chunk(df)
         
         if not processed_df.empty:
-            # 중복 제거
+            # 스마트 중복 제거
             before_dedup = len(processed_df)
-            processed_df = processed_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+            
+            if self.preserve_data:
+                # 관대한 중복 제거 (브랜드+상품명만으로 중복 판단)
+                processed_df = processed_df.drop_duplicates(subset=['브랜드', '상품명'], keep='first')
+                logger.info("관대한 중복 제거 적용 (브랜드+상품명 기준)")
+            else:
+                # 엄격한 중복 제거 (브랜드+상품명+옵션입력)
+                processed_df = processed_df.drop_duplicates(subset=['브랜드', '상품명', '옵션입력'], keep='first')
+                logger.info("엄격한 중복 제거 적용 (브랜드+상품명+옵션 기준)")
+            
             after_dedup = len(processed_df)
             
             logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
@@ -181,16 +201,48 @@ class BrandSheetsAPI:
             logger.info(f"필터링 전 분석 - 빈 브랜드: {empty_brand}, nan 브랜드: {nan_brand}, 헤더 브랜드: {header_brand}")
             logger.info(f"필터링 전 분석 - 빈 상품명: {empty_product}, 헤더 상품명: {header_product}")
             
-            # 빈 데이터 제거 (완화된 조건)
-            mask = (
-                (brand_data['브랜드'].str.strip() != '') & 
-                (brand_data['브랜드'] != 'nan') &
-                (brand_data['브랜드'].str.lower() != '브랜드') &  # 대소문자 구분 없이
-                (brand_data['상품명'].str.strip() != '') &
-                (brand_data['상품명'].str.lower() != '상품명') &  # 대소문자 구분 없이
-                (~brand_data['브랜드'].isna()) &  # NaN 값 제외
-                (~brand_data['상품명'].isna())   # NaN 값 제외
-            )
+            # 데이터 보존 모드에 따른 필터링
+            if self.preserve_data:
+                # 관대한 필터링 (데이터 보존 우선)
+                mask = (
+                    (brand_data['브랜드'].str.strip() != '') & 
+                    (brand_data['브랜드'] != 'nan') &
+                    (brand_data['브랜드'].str.lower() != '브랜드') &
+                    (brand_data['상품명'].str.strip() != '') &
+                    (brand_data['상품명'].str.lower() != '상품명') &
+                    (~brand_data['브랜드'].isna()) &
+                    (~brand_data['상품명'].isna())
+                )
+                logger.info("관대한 필터링 적용 (데이터 보존 우선)")
+            else:
+                # 엄격한 필터링 (기존 방식)
+                mask = (
+                    (brand_data['브랜드'].str.strip() != '') & 
+                    (brand_data['브랜드'] != 'nan') &
+                    (brand_data['브랜드'].str.lower() != '브랜드') &
+                    (brand_data['상품명'].str.strip() != '') &
+                    (brand_data['상품명'].str.lower() != '상품명') &
+                    (~brand_data['브랜드'].isna()) &
+                    (~brand_data['상품명'].isna()) &
+                    (brand_data['공급가'] > 0)  # 공급가가 0보다 큰 경우만
+                )
+                logger.info("엄격한 필터링 적용")
+            
+            # 각 조건별 제외되는 항목 수 분석
+            conditions = {
+                '빈_브랜드': (brand_data['브랜드'].str.strip() == '').sum(),
+                'nan_브랜드': (brand_data['브랜드'] == 'nan').sum(), 
+                '헤더_브랜드': (brand_data['브랜드'].str.lower() == '브랜드').sum(),
+                '빈_상품명': (brand_data['상품명'].str.strip() == '').sum(),
+                '헤더_상품명': (brand_data['상품명'].str.lower() == '상품명').sum(),
+                '브랜드_NA': brand_data['브랜드'].isna().sum(),
+                '상품명_NA': brand_data['상품명'].isna().sum(),
+            }
+            
+            if not self.preserve_data:
+                conditions['공급가_0'] = (brand_data['공급가'] <= 0).sum()
+            
+            logger.info(f"필터링 조건별 제외 항목: {conditions}")
             
             brand_data = brand_data[mask]
             filtered_count = len(brand_data)
