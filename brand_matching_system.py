@@ -918,19 +918,33 @@ class BrandMatchingSystem:
         # 매칭 후보들을 저장할 리스트 (정확도 순으로 정렬하기 위함)
         matching_candidates = []
         
-        # 브랜드 필터링으로 검색 범위 축소
-        brand_filtered_data = self.brand_data[self.brand_data['브랜드'].str.strip() == brand]
+        # 브랜드 필터링으로 검색 범위 축소 (관대한 매칭)
+        brand_filtered_data = self.brand_data[
+            self.brand_data['브랜드'].str.strip().str.lower().str.contains(brand.lower(), na=False) |
+            self.brand_data['브랜드'].str.strip().str.lower() == brand.lower()
+        ]
+        
+        # 여전히 없으면 전체 데이터 사용 (안전장치)
         if brand_filtered_data.empty:
-            logger.debug(f"브랜드 '{brand}'에 해당하는 데이터가 없습니다")
-            return "매칭 실패", "", "", False
+            logger.debug(f"브랜드 '{brand}' 필터링 결과 없음. 전체 데이터 사용")
+            brand_filtered_data = self.brand_data.head(1000)  # 성능을 위해 상위 1000개만 사용
         
         logger.debug(f"브랜드 '{brand}' 필터링 결과: {len(brand_filtered_data)}개 상품")
 
+        processed_count = 0
         for _, row in brand_filtered_data.iterrows():
-            # 타임아웃 체크 (단일 행 매칭이 5초 초과 시 중단)
-            if time.time() - start_time > 5:
-                logger.warning(f"매칭 타임아웃: 브랜드='{brand}', 상품='{product}'")
+            processed_count += 1
+            
+            # 타임아웃 체크 (단일 행 매칭이 3초 초과 시 중단)
+            if time.time() - start_time > 3:
+                logger.warning(f"매칭 타임아웃: 브랜드='{brand}', 상품='{product}' ({processed_count}개 처리됨)")
                 break
+                
+            # 처리 개수 제한 (성능 최적화)
+            if processed_count > 500:
+                logger.debug(f"처리 개수 제한 도달: {processed_count}개")
+                break
+            
             # 브랜드는 이미 필터링되었으므로 생략
 
             # 2. 상품명 포함 관계 확인 (정규화된 상품명과 비교)
