@@ -52,13 +52,43 @@ class BrandMatchingSystem:
             'braces': r'\{[^}]*\}',
             'special_chars': r'[^\w\s가-힣]',
             'multiple_spaces': r'\s+',
+            'comma_spaces': r'\s*,\s*',
+            'multiple_commas': r',+',
+            'korean_alpha_num': r'[가-힣a-zA-Z0-9]',
+            'word_boundary': r'^[a-zA-Z0-9가-힣\s]+$',
+            
+            # 사이즈 관련 패턴들
+            'size_s_xl': r'\([sS]~[xX][lL]\)',
+            'size_s_xl_dash': r'\([sS]-[xX][lL]\)',
+            'size_xs_xl': r'\([xX][sS]~[xX][lL]\)',
+            'size_xs_xl_dash': r'\([xX][sS]-[xX][lL]\)',
+            'size_m_jxl': r'\([mM]~[jJ][xX][lL]\)',
+            'size_m_jxl_dash': r'\([mM]-[jJ][xX][lL]\)',
+            'size_numbers': r'\([0-9]+[~-][0-9]+\)',
+            'size_js_patterns': r'\([jJ][sS][~-][jJ][xXlLmM]+\)',
+            
+            # 옵션 파싱 패턴들
+            'color_keywords': r'(?:색상|컬러|Color)',
+            'size_keywords': r'(?:사이즈|Size)',
+            'slash_pattern': r'^([^/]+)/([^/]+)$',
+            'dash_pattern': r'^([^-]+)-([^-]+)$',
+            'size_check': r'[0-9]|[SMLX]',
+            'exact_size': r'^[SMLX]$|^[0-9]+$',
+            
+            # 브랜드매칭시트 패턴들
             'size_pattern': r'사이즈\s*[\{\[\(]([^}\]\)]+)[\}\]\)]',
             'color_pattern': r'색상\s*[\{\[\(]([^}\]\)]+)[\}\]\)]',
             'option_split': r'[,/\s]+',
         }
         
         for name, pattern in patterns.items():
-            self._compiled_patterns[name] = re.compile(pattern)
+            try:
+                if name in ['color_keywords', 'size_keywords', 'size_check', 'exact_size']:
+                    self._compiled_patterns[name] = re.compile(pattern, re.IGNORECASE)
+                else:
+                    self._compiled_patterns[name] = re.compile(pattern)
+            except Exception as e:
+                logger.error(f"패턴 컴파일 실패 ({name}): {e}")
         
         logger.info(f"정규식 패턴 {len(patterns)}개 컴파일 완료")
 
@@ -183,7 +213,7 @@ class BrandMatchingSystem:
         escaped_keyword = re.escape(keyword)
         
         # 컴파일된 패턴 사용
-        if self._compiled_patterns['word_boundary'].match(keyword):
+        if 'word_boundary' in self._compiled_patterns and self._compiled_patterns['word_boundary'].match(keyword):
             return re.compile(r'\b' + escaped_keyword + r'\b', re.IGNORECASE)
         else:
             return re.compile(escaped_keyword, re.IGNORECASE)
@@ -288,20 +318,68 @@ class BrandMatchingSystem:
         try:
             normalized = name_str.lower()
             
-            # 컴파일된 패턴 사용
-            normalized = self._compiled_patterns['parentheses'].sub('', normalized)
-            normalized = self._compiled_patterns['brackets'].sub('', normalized)
-            normalized = self._compiled_patterns['braces'].sub('', normalized)
-            normalized = self._compiled_patterns['special_chars'].sub(' ', normalized)
-            normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized)
+            # 컴파일된 패턴 사용 (안전하게)
+            if 'parentheses' in self._compiled_patterns:
+                normalized = self._compiled_patterns['parentheses'].sub('', normalized)
+            if 'brackets' in self._compiled_patterns:
+                normalized = self._compiled_patterns['brackets'].sub('', normalized)
+            if 'braces' in self._compiled_patterns:
+                normalized = self._compiled_patterns['braces'].sub('', normalized)
+            if 'special_chars' in self._compiled_patterns:
+                normalized = self._compiled_patterns['special_chars'].sub(' ', normalized)
+            if 'multiple_spaces' in self._compiled_patterns:
+                normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized)
+            
             normalized = normalized.strip()
             
-            # 키워드 제거 (최적화된 방식)
+            # 키워드 제거 (안전한 방식)
             if self.keyword_list:
-                for keyword in self.keyword_list:
-                    if keyword in normalized:
-                        normalized = normalized.replace(keyword, ' ')
-                normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized).strip()
+                # * 기호로 감싸진 패턴 우선 처리
+                star_keywords = [kw for kw in self.keyword_list 
+                                if kw.startswith('*') and kw.endswith('*') and len(kw) > 2]
+                
+                for keyword in star_keywords:
+                    variations = [
+                        keyword,
+                        keyword.replace('~', '-'),
+                        keyword.replace('-', '~'),
+                    ]
+                    
+                    for variation in variations:
+                        if variation in normalized:
+                            normalized = normalized.replace(variation, '')
+                            break
+                
+                # 일반 키워드 제거
+                regular_keywords = [kw for kw in self.keyword_list 
+                                   if not (kw.startswith('*') and kw.endswith('*'))]
+                
+                for keyword in regular_keywords:
+                    if not keyword:
+                        continue
+                    
+                    # 괄호와 함께 키워드 제거
+                    parentheses_pattern = re.compile(r'\(' + re.escape(keyword) + r'\)', re.IGNORECASE)
+                    normalized = parentheses_pattern.sub('', normalized)
+                    
+                    # 단독 키워드 제거
+                    keyword_pattern = self._get_keyword_pattern(keyword)
+                    normalized = keyword_pattern.sub('', normalized)
+                
+                # 텍스트 정리
+                if 'comma_spaces' in self._compiled_patterns:
+                    normalized = self._compiled_patterns['comma_spaces'].sub(',', normalized)
+                if 'multiple_commas' in self._compiled_patterns:
+                    normalized = self._compiled_patterns['multiple_commas'].sub(',', normalized)
+                if 'multiple_spaces' in self._compiled_patterns:
+                    normalized = self._compiled_patterns['multiple_spaces'].sub(' ', normalized)
+                
+                normalized = normalized.strip(',').strip()
+            
+            # 결과 검증
+            if len(normalized) < 2 or ('korean_alpha_num' in self._compiled_patterns and 
+                                      not self._compiled_patterns['korean_alpha_num'].search(normalized)):
+                normalized = name_str.lower()
             
             # 캐시에 저장 (크기 제한 확인)
             with self._cache_lock:
