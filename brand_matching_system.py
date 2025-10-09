@@ -1181,9 +1181,9 @@ class BrandMatchingSystem:
         
         logger.info(f"총 {total_count:,}개 행 처리 시작")
 
-        for idx, row in sheet2_df.iterrows():
+        # ⚡ 성능 개선: enumerate 사용으로 O(N^2) → O(N)
+        for current_index, (idx, row) in enumerate(sheet2_df.iterrows(), start=1):
             # 진행률 표시 (10개마다 - 더 자주 로깅)
-            current_index = idx + 1 if isinstance(idx, int) else len([i for i in sheet2_df.index if i <= idx])
             if current_index % 10 == 0 or current_index == 1:
                 elapsed_time = time.time() - start_time
                 progress = (current_index / total_count) * 100
