@@ -1253,7 +1253,7 @@ class BrandMatchingSystem:
                     results['W열(금액)'][current_index] = 0
                 success_count += 1
             else:
-                # 매칭 실패한 상품 정보 수집
+                # 매칭 실패한 상품 정보 수집 (필수 정보만)
                 failed_product = {
                     '브랜드': brand,
                     '상품명': product,
@@ -1263,10 +1263,8 @@ class BrandMatchingSystem:
                     '행번호': idx
                 }
                 
-                # 원본 행의 모든 데이터 추가
-                for col_name, col_value in row.items():
-                    if col_name not in failed_product:
-                        failed_product[col_name] = col_value
+                # ⚡ 성능 개선: row.items() 제거 (매우 느림!)
+                # 원본 데이터는 나중에 sheet2_df에서 가져올 수 있음
                 
                 failed_products.append(failed_product)
                 
