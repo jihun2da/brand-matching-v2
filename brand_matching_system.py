@@ -1023,6 +1023,10 @@ class BrandMatchingSystem:
         matching_candidates = []
         processed_count = 0
         
+        # ⚡ 최적화: 업로드 파일의 변형을 미리 생성 (캐싱)
+        upload_size_variants = self.parse_size_variants(size) if size else []
+        upload_color_variants = self.parse_color_variants(color) if color else []
+        
         # 인덱스를 사용하여 직접 접근 (빠른 속도)
         for idx in candidate_indices:
             # 인덱스 유효성 검사
@@ -1038,9 +1042,9 @@ class BrandMatchingSystem:
             
             processed_count += 1
             
-            # 타임아웃 체크 (단일 행 매칭이 2초 초과 시 중단)
-            if time.time() - start_time > 2:
-                logger.warning(f"⏰ 매칭 타임아웃 (2초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
+            # 타임아웃 체크 (단일 행 매칭이 3초 초과 시 중단)
+            if time.time() - start_time > 3:
+                logger.warning(f"⏰ 매칭 타임아웃 (3초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
                 break
             
             # 무한 루프 방지: 처리 개수 제한 (100개로 제한)
@@ -1074,9 +1078,7 @@ class BrandMatchingSystem:
                             variants = self.parse_color_variants(token)
                             brand_color_variants.extend(variants)
                     
-                    # 업로드 파일의 색상에서도 변형 추출
-                    upload_color_variants = self.parse_color_variants(color)
-                    
+                    # ⚡ 최적화: 이미 생성된 upload_color_variants 사용 (루프 밖에서 생성됨)
                     # 각 변형들 간의 매칭 확인
                     for brand_variant in brand_color_variants:
                         for upload_variant in upload_color_variants:
@@ -1113,8 +1115,7 @@ class BrandMatchingSystem:
                         variants = self.parse_size_variants(token)
                         brand_size_variants.extend(variants)
                 
-                # 업로드 파일의 사이즈에서도 변형 추출
-                upload_size_variants = self.parse_size_variants(size)
+                # ⚡ 최적화: 이미 생성된 upload_size_variants 사용 (루프 밖에서 생성됨)
                 
                 # 각 변형들 간의 매칭 확인 (정확도 순으로)
                 for brand_variant in brand_size_variants:
@@ -1154,12 +1155,18 @@ class BrandMatchingSystem:
                                     match_score = 50
                                     match_type = "낮은 유사도 포함"
             
-            # 매칭이 성공한 경우 후보에 추가
+            # 매칭이 성공한 경우 처리
             if match_score > 0:
                 공급가 = row['공급가']
                 중도매 = row['중도매']
                 브랜드상품명 = f"{row['브랜드']} {row['상품명']}"
                 
+                # ⚡ 최적화: 100점 (완벽한 매칭) 찾으면 즉시 리턴 (조기 종료)
+                if match_score == 100:
+                    logger.debug(f"✅ 완벽한 매칭 발견 (100점): {브랜드상품명} - 즉시 리턴!")
+                    return 공급가, 중도매, 브랜드상품명, True
+                
+                # 100점이 아니면 후보에 추가
                 matching_candidates.append({
                     'score': match_score,
                     'type': match_type,
