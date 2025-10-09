@@ -637,14 +637,14 @@ class BrandMatchingSystem:
                 
                 processed_count += 1
                 
-                # 타임아웃 체크 (개별 상품당 3초)
-                if time.time() - row_start_time > 3:
-                    logger.warning(f"유사도 매칭 타임아웃: {brand} - {product_name} ({processed_count}개 처리됨)")
+                # 타임아웃 체크 (개별 상품당 5초)
+                if time.time() - row_start_time > 5:
+                    logger.warning(f"⚠️  유사도 매칭 타임아웃 (5초): {brand} - {product_name[:30]}... ({processed_count}개 처리됨)")
                     break
                 
-                # 처리 개수 제한 (성능 최적화 - 더 작게)
-                if processed_count > 20:
-                    logger.debug(f"처리 개수 제한 도달: {processed_count}개")
+                # 무한 루프 방지: 처리 개수 제한 (30개로 제한)
+                if processed_count > 30:
+                    logger.warning(f"⚠️  유사도 매칭 처리 개수 제한 (30개): {brand} - {product_name[:30]}...")
                     break
                 
                 brand_brand = str(brand_row.get('브랜드', '')).strip()
@@ -990,15 +990,20 @@ class BrandMatchingSystem:
         import time
         start_time = time.time()
         
+        # 빠른 실패: 빈 값 체크
         brand = str(brand).strip()
         product = str(product).strip()
+        
+        if not brand or not product:
+            return "매칭 실패", "", "", False
+        
         size = str(size).strip().lower()
         color = str(color).strip().lower()
 
         # 상품명 정규화 (키워드 제거)
         normalized_product = self.normalize_product_name(product)
 
-        logger.debug(f"매칭 시도: 브랜드='{brand}', 상품명='{product}' (정규화: '{normalized_product}'), 사이즈='{size}', 색상='{color}'")
+        logger.debug(f"매칭 시도: 브랜드='{brand}', 상품명='{product[:30]}' (정규화: '{normalized_product[:30]}'), 사이즈='{size}', 색상='{color}'")
 
         if self.brand_data is None or self.brand_data.empty:
             logger.warning("브랜드 데이터가 없습니다")
@@ -1033,14 +1038,14 @@ class BrandMatchingSystem:
             
             processed_count += 1
             
-            # 타임아웃 체크 (단일 행 매칭이 1초 초과 시 중단)
-            if time.time() - start_time > 1:
-                logger.warning(f"매칭 타임아웃: 브랜드='{brand}', 상품='{product}' ({processed_count}개 처리됨)")
+            # 타임아웃 체크 (단일 행 매칭이 2초 초과 시 중단)
+            if time.time() - start_time > 2:
+                logger.warning(f"⏰ 매칭 타임아웃 (2초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
                 break
-                
-            # 처리 개수 제한 (성능 최적화 - 100개로 제한)
+            
+            # 무한 루프 방지: 처리 개수 제한 (100개로 제한)
             if processed_count > 100:
-                logger.debug(f"처리 개수 제한 도달: {processed_count}개")
+                logger.warning(f"처리 개수 제한 (100개): 브랜드='{brand}' ({processed_count}개 처리됨)")
                 break
             
             # 브랜드는 이미 필터링되었으므로 생략
@@ -1197,16 +1202,18 @@ class BrandMatchingSystem:
         logger.info(f"총 {total_count:,}개 행 처리 시작")
 
         for idx, row in sheet2_df.iterrows():
-            # 진행률 표시 (100개마다)
+            # 진행률 표시 (10개마다 - 더 자주 로깅)
             current_index = idx + 1 if isinstance(idx, int) else len([i for i in sheet2_df.index if i <= idx])
-            if current_index % 100 == 0:
+            if current_index % 10 == 0 or current_index == 1:
                 elapsed_time = time.time() - start_time
                 progress = (current_index / total_count) * 100
-                logger.info(f"진행률: {current_index:,}/{total_count:,} ({progress:.1f}%) - 경과시간: {elapsed_time:.1f}초")
+                avg_time = elapsed_time / current_index
+                eta = avg_time * (total_count - current_index)
+                logger.info(f"진행률: {current_index:,}/{total_count:,} ({progress:.1f}%) - 경과: {elapsed_time:.1f}초, 예상 남은 시간: {eta:.1f}초")
                 
-                # 타임아웃 체크 (30분)
-                if elapsed_time > 1800:  # 30분
-                    logger.error("매칭 처리 타임아웃 (30분 초과)")
+                # 타임아웃 체크 (10분으로 단축)
+                if elapsed_time > 600:  # 10분
+                    logger.error("매칭 처리 타임아웃 (10분 초과) - 처리 중단")
                     break
             
             # 브랜드, 상품명, 사이즈 추출
@@ -1229,12 +1236,17 @@ class BrandMatchingSystem:
                 공급가, 중도매, 브랜드상품명, success = self.match_row(brand, product, size, color)
                 row_elapsed = time.time() - row_start_time
                 
-                # 단일 행 처리가 10초를 초과하면 경고
+                # 단일 행 처리가 3초를 초과하면 경고
+                if row_elapsed > 3:
+                    logger.warning(f"⚠️  행 {current_index} 처리 느림: {row_elapsed:.1f}초 (브랜드: {brand}, 상품: {product[:30]}...)")
+                
+                # 단일 행 처리가 10초를 초과하면 강제 중단
                 if row_elapsed > 10:
-                    logger.warning(f"행 {idx} 처리 시간 초과: {row_elapsed:.1f}초 (브랜드: {brand}, 상품: {product})")
+                    logger.error(f"❌ 행 {current_index} 처리 시간 초과 (10초): {row_elapsed:.1f}초 - 강제 실패 처리")
+                    공급가, 중도매, 브랜드상품명, success = "매칭 실패", "", "", False
                 
             except Exception as e:
-                logger.error(f"행 {idx} 매칭 중 오류: {e} (브랜드: {brand}, 상품: {product})")
+                logger.error(f"행 {current_index} 매칭 중 오류: {e} (브랜드: {brand}, 상품: {product})")
                 공급가, 중도매, 브랜드상품명, success = "매칭 실패", "", "", False
 
             # 결과 저장
