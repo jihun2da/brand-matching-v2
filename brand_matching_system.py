@@ -1182,7 +1182,13 @@ class BrandMatchingSystem:
         print(f"\n총 {total_count:,}개 행 처리 시작...", flush=True)
         logger.info(f"총 {total_count:,}개 행 처리 시작")
 
-        # ⚡ 성능 개선: itertuples 사용 (iterrows보다 100배 빠름!)
+        # ⚡ 성능 개선: 결과를 리스트에 모았다가 한 번에 할당 (at 반복 사용 방지)
+        results = {
+            'N열(중도매명)': [''] * len(sheet2_df),
+            'O열(도매가격)': [0] * len(sheet2_df),
+            'W열(금액)': [0] * len(sheet2_df)
+        }
+        
         for current_index in range(len(sheet2_df)):
             idx = sheet2_df.index[current_index]
             row = sheet2_df.iloc[current_index]
@@ -1211,9 +1217,9 @@ class BrandMatchingSystem:
 
             # 빈 값 체크
             if not brand or not product:
-                sheet2_df.at[idx, 'N열(중도매명)'] = ""
-                sheet2_df.at[idx, 'O열(도매가격)'] = 0
-                sheet2_df.at[idx, 'W열(금액)'] = 0
+                results['N열(중도매명)'][current_index] = ""
+                results['O열(도매가격)'][current_index] = 0
+                results['W열(금액)'][current_index] = 0
                 continue
 
             # 매칭 수행 (타임아웃 적용)
@@ -1235,16 +1241,16 @@ class BrandMatchingSystem:
                 logger.error(f"행 {current_index} 매칭 중 오류: {e} (브랜드: {brand}, 상품: {product})")
                 공급가, 중도매, 브랜드상품명, success = "매칭 실패", "", "", False
 
-            # 결과 저장
+            # 결과 저장 (리스트에 - 빠름!)
             if success and 공급가 != "매칭 실패":
-                sheet2_df.at[idx, 'N열(중도매명)'] = 중도매
-                sheet2_df.at[idx, 'O열(도매가격)'] = 공급가
+                results['N열(중도매명)'][current_index] = 중도매
+                results['O열(도매가격)'][current_index] = 공급가
                 # W열 금액 계산: 도매가격 × 수량
                 try:
                     total_amount = float(공급가) * int(quantity)
-                    sheet2_df.at[idx, 'W열(금액)'] = total_amount
+                    results['W열(금액)'][current_index] = total_amount
                 except:
-                    sheet2_df.at[idx, 'W열(금액)'] = 0
+                    results['W열(금액)'][current_index] = 0
                 success_count += 1
             else:
                 # 매칭 실패한 상품 정보 수집
@@ -1264,13 +1270,21 @@ class BrandMatchingSystem:
                 
                 failed_products.append(failed_product)
                 
-                sheet2_df.at[idx, 'N열(중도매명)'] = ""
-                sheet2_df.at[idx, 'O열(도매가격)'] = 0
-                sheet2_df.at[idx, 'W열(금액)'] = 0
+                results['N열(중도매명)'][current_index] = ""
+                results['O열(도매가격)'][current_index] = 0
+                results['W열(금액)'][current_index] = 0
 
+        # ⚡ 성능 개선: 루프 완료 후 한 번에 할당 (매우 빠름!)
+        print("\n결과 저장 중...", flush=True)
+        sheet2_df['N열(중도매명)'] = results['N열(중도매명)']
+        sheet2_df['O열(도매가격)'] = results['O열(도매가격)']
+        sheet2_df['W열(금액)'] = results['W열(금액)']
+        
         total_elapsed = time.time() - start_time
         success_rate = (success_count / total_count * 100) if total_count > 0 else 0
-        logger.info(f"매칭 완료: {success_count:,}/{total_count:,} ({success_rate:.1f}%) - 총 소요시간: {total_elapsed:.1f}초")
+        msg = f"매칭 완료: {success_count:,}/{total_count:,} ({success_rate:.1f}%) - 총 소요시간: {total_elapsed:.1f}초"
+        print(msg, flush=True)
+        logger.info(msg)
         logger.info(f"매칭 실패: {len(failed_products):,}개 상품")
 
         return sheet2_df, failed_products
