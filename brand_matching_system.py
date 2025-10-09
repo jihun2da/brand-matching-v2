@@ -1194,15 +1194,18 @@ class BrandMatchingSystem:
         indices = sheet2_df.index.tolist()
         
         for current_index, (row_dict, idx) in enumerate(zip(rows_dict, indices)):
-            # 진행률 표시 (10개마다 - 즉시 출력)
-            if (current_index + 1) % 10 == 0 or current_index == 0:
-                elapsed_time = time.time() - start_time
-                progress = ((current_index + 1) / total_count) * 100
+            # 진행률 표시 (매 항목마다 - 즉시 출력)
+            elapsed_time = time.time() - start_time
+            progress = ((current_index + 1) / total_count) * 100
+            
+            # 매 항목마다 짧게 출력
+            print(f"\r진행: {current_index + 1}/{total_count} ({progress:.0f}%)", end='', flush=True)
+            
+            # 10개마다 상세 출력
+            if (current_index + 1) % 10 == 0:
                 avg_time = elapsed_time / (current_index + 1)
                 eta = avg_time * (total_count - current_index - 1)
-                msg = f"진행률: {current_index + 1:,}/{total_count:,} ({progress:.1f}%) - 경과: {elapsed_time:.1f}초, 예상: {eta:.1f}초"
-                print(msg, flush=True)
-                # logger.info(msg)  # 로깅 비활성화 (속도 향상)
+                print(f"\r진행률: {current_index + 1:,}/{total_count:,} ({progress:.1f}%) - 경과: {elapsed_time:.1f}초, 예상: {eta:.1f}초", flush=True)
                 
                 # 타임아웃 체크 (10분으로 단축)
                 if elapsed_time > 600:  # 10분
