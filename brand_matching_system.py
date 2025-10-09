@@ -1111,7 +1111,7 @@ class BrandMatchingSystem:
                 color_similarity * 0.2
             )
             
-            logger.debug(f"후보 평가: {row['상품명'][:20]}... (상품={product_similarity:.1f}%, 사이즈={size_similarity:.1f}%, 색상={color_similarity:.1f}%, 종합={total_similarity:.1f}%)")
+            logger.debug(f"후보 평가: {row_dict.get('상품명', '')[:20]}... (상품={product_similarity:.1f}%, 사이즈={size_similarity:.1f}%, 색상={color_similarity:.1f}%, 종합={total_similarity:.1f}%)")
             
             # 종합 유사도가 60% 미만이면 스킵
             if total_similarity < 60:
