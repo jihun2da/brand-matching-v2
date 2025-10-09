@@ -1059,9 +1059,9 @@ class BrandMatchingSystem:
                 logger.warning(f"⏰ 매칭 타임아웃 (3초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
                 break
             
-            # 무한 루프 방지: 처리 개수 제한 (50개로 제한)
-            if processed_count > 50:
-                logger.warning(f"처리 개수 제한 (50개): 브랜드='{brand}' ({processed_count}개 처리됨)")
+            # 무한 루프 방지: 처리 개수 제한 (20개로 제한)
+            if processed_count > 20:
+                logger.warning(f"처리 개수 제한 (20개): 브랜드='{brand}' ({processed_count}개 처리됨)")
                 break
             
             # 브랜드는 이미 인덱스로 필터링됨 (100% 매칭)
@@ -1074,6 +1074,16 @@ class BrandMatchingSystem:
             
             # 상품명 유사도가 너무 낮으면 스킵 (빠른 필터링)
             if product_similarity < 70:
+                continue
+            
+            # ⚡ 추가 필터링: 길이 비율 체크 (짧은 단어의 부정확한 매칭 방지)
+            min_len = min(len(normalized_product), len(row_product))
+            max_len = max(len(normalized_product), len(row_product))
+            length_ratio = min_len / max_len if max_len > 0 else 0
+            
+            # 길이 비율이 0.7 미만이면 스킵 (예: "티" vs "반팔티" 제외)
+            if length_ratio < 0.7:
+                logger.debug(f"길이 비율 필터링: '{normalized_product}' vs '{row_product}' (비율: {length_ratio:.2f})")
                 continue
             
             # 2. 색상 유사도 계산
