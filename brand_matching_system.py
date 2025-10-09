@@ -1202,7 +1202,7 @@ class BrandMatchingSystem:
                 eta = avg_time * (total_count - current_index - 1)
                 msg = f"진행률: {current_index + 1:,}/{total_count:,} ({progress:.1f}%) - 경과: {elapsed_time:.1f}초, 예상: {eta:.1f}초"
                 print(msg, flush=True)
-                logger.info(msg)
+                # logger.info(msg)  # 로깅 비활성화 (속도 향상)
                 
                 # 타임아웃 체크 (10분으로 단축)
                 if elapsed_time > 600:  # 10분
@@ -1231,11 +1231,11 @@ class BrandMatchingSystem:
                 
                 # 단일 행 처리가 3초를 초과하면 경고
                 if row_elapsed > 3:
-                    logger.warning(f"⚠️  행 {current_index} 처리 느림: {row_elapsed:.1f}초 (브랜드: {brand}, 상품: {product[:30]}...)")
+                    print(f"⚠️  행 {current_index} 느림: {row_elapsed:.1f}초", flush=True)
                 
                 # 단일 행 처리가 10초를 초과하면 강제 중단
                 if row_elapsed > 10:
-                    logger.error(f"❌ 행 {current_index} 처리 시간 초과 (10초): {row_elapsed:.1f}초 - 강제 실패 처리")
+                    print(f"❌ 행 {current_index} 시간 초과 (10초)", flush=True)
                     공급가, 중도매, 브랜드상품명, success = "매칭 실패", "", "", False
                 
             except Exception as e:
