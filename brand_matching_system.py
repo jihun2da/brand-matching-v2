@@ -1189,10 +1189,11 @@ class BrandMatchingSystem:
             'W열(금액)': [0] * len(sheet2_df)
         }
         
-        for current_index in range(len(sheet2_df)):
-            idx = sheet2_df.index[current_index]
-            row = sheet2_df.iloc[current_index]
-            
+        # ⚡ 최고 속도: to_dict('records') 사용 (가장 빠름!)
+        rows_dict = sheet2_df.to_dict('records')
+        indices = sheet2_df.index.tolist()
+        
+        for current_index, (row_dict, idx) in enumerate(zip(rows_dict, indices)):
             # 진행률 표시 (10개마다 - 즉시 출력)
             if (current_index + 1) % 10 == 0 or current_index == 0:
                 elapsed_time = time.time() - start_time
@@ -1209,11 +1210,11 @@ class BrandMatchingSystem:
                     break
             
             # 브랜드, 상품명, 사이즈 추출
-            brand = str(row.get('H열(브랜드)', '')).strip()
-            product = str(row.get('I열(상품명)', '')).strip()
-            size = str(row.get('K열(사이즈)', '')).strip()
-            color = str(row.get('J열(색상)', '')).strip() # 색상 추출
-            quantity = row.get('L열(수량)', 1)
+            brand = str(row_dict.get('H열(브랜드)', '')).strip()
+            product = str(row_dict.get('I열(상품명)', '')).strip()
+            size = str(row_dict.get('K열(사이즈)', '')).strip()
+            color = str(row_dict.get('J열(색상)', '')).strip()
+            quantity = row_dict.get('L열(수량)', 1)
 
             # 빈 값 체크
             if not brand or not product:
