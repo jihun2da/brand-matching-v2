@@ -705,8 +705,8 @@ class BrandMatchingSystem:
                     best_match = {
                         'brand_brand': brand_brand,
                         'brand_product': brand_product,
-                        'brand_wholesale': brand_row.get('중도매', ''),
-                        'brand_supply': brand_row.get('공급가', ''),
+                        'brand_wholesale': brand_row_dict.get('중도매', ''),
+                        'brand_supply': brand_row_dict.get('공급가', ''),
                         'brand_options': brand_options,
                         'product_similarity': product_similarity,
                         'color_similarity': color_similarity,
