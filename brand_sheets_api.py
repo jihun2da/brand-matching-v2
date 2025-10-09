@@ -138,6 +138,10 @@ class BrandSheetsAPI:
                 after_dedup = len(final_df)
                 
                 logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
+                
+                # 인덱스 재설정 (중요! 브랜드 인덱스 오류 방지)
+                final_df = final_df.reset_index(drop=True)
+                
                 logger.info(f"대용량 데이터 처리 완료: {len(final_df):,}개 상품")
                 return final_df
             else:
@@ -169,6 +173,10 @@ class BrandSheetsAPI:
             after_dedup = len(processed_df)
             
             logger.info(f"중복 제거: {before_dedup:,}개 → {after_dedup:,}개 (제거된 중복: {before_dedup - after_dedup:,}개)")
+            
+            # 인덱스 재설정 (중요! 브랜드 인덱스 오류 방지)
+            processed_df = processed_df.reset_index(drop=True)
+            
             logger.info(f"일반 데이터 처리 완료: {len(processed_df):,}개 상품")
         
         return processed_df
@@ -253,6 +261,9 @@ class BrandSheetsAPI:
             if not brand_data.empty:
                 sample_data = brand_data.head(3)[['브랜드', '상품명']].to_dict('records')
                 logger.info(f"샘플 데이터: {sample_data}")
+            
+            # 인덱스 재설정 (중요! 브랜드 인덱스 오류 방지)
+            brand_data = brand_data.reset_index(drop=True)
             
             return brand_data
             
