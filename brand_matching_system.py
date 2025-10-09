@@ -1034,9 +1034,9 @@ class BrandMatchingSystem:
         
         logger.debug(f"⚡ 브랜드 '{brand}' 인덱스 검색 결과: {len(candidate_indices)}개 상품 (기존 대비 10배 빠름)")
 
-        # ⚡ 유사도 매칭: 최고 점수 추적
-        best_match = None
-        best_similarity = 0.0
+        # ⚡ 유사도 매칭: 2단계 접근
+        # 1단계: 상품명 유사도만 빠르게 계산하여 후보 선정
+        product_candidates = []
         processed_count = 0
         
         # 인덱스를 사용하여 직접 접근 (빠른 속도)
@@ -1054,76 +1054,91 @@ class BrandMatchingSystem:
             
             processed_count += 1
             
-            # 타임아웃 체크 (단일 행 매칭이 3초 초과 시 중단)
-            if time.time() - start_time > 3:
-                logger.warning(f"⏰ 매칭 타임아웃 (3초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
+            # 타임아웃 체크 (1단계는 빠르므로 1초로 단축)
+            if time.time() - start_time > 1:
+                logger.warning(f"⏰ 1단계 타임아웃 (1초): 브랜드='{brand}' ({processed_count}개 처리됨)")
                 break
             
-            # 무한 루프 방지: 처리 개수 제한 (20개로 제한)
-            if processed_count > 20:
-                logger.warning(f"처리 개수 제한 (20개): 브랜드='{brand}' ({processed_count}개 처리됨)")
-                break
-            
-            # 브랜드는 이미 인덱스로 필터링됨 (100% 매칭)
-            
-            # ⚡ 유사도 기반 매칭 시작
-            
-            # 1. 상품명 유사도 계산 (정규화된 상품명 비교)
+            # 1단계: 상품명 유사도만 빠르게 계산
             row_product = self.normalize_product_name(str(row['상품명']).strip())
             product_similarity = self.calculate_similarity(normalized_product, row_product)
             
-            # 상품명 유사도가 너무 낮으면 스킵 (빠른 필터링)
+            # 상품명 유사도가 너무 낮으면 스킵
             if product_similarity < 70:
                 continue
             
-            # ⚡ 추가 필터링: 길이 비율 체크 (짧은 단어의 부정확한 매칭 방지)
+            # 길이 비율 체크
             min_len = min(len(normalized_product), len(row_product))
             max_len = max(len(normalized_product), len(row_product))
             length_ratio = min_len / max_len if max_len > 0 else 0
             
-            # 길이 비율이 0.7 미만이면 스킵 (예: "티" vs "반팔티" 제외)
             if length_ratio < 0.7:
-                logger.debug(f"길이 비율 필터링: '{normalized_product}' vs '{row_product}' (비율: {length_ratio:.2f})")
                 continue
             
-            # 2. 색상 유사도 계산
-            color_similarity = 100.0  # 기본값 (색상 없으면 100%)
+            # 후보로 추가 (상품명 유사도와 함께 저장)
+            product_candidates.append({
+                'idx': idx,
+                'row': row,
+                'product_similarity': product_similarity,
+                'row_product': row_product
+            })
+        
+        # 후보가 없으면 실패
+        if not product_candidates:
+            logger.debug(f"❌ 매칭 실패: 상품명 유사도 70% 이상 후보 없음")
+            return "매칭 실패", "", "", False
+        
+        # 2단계: 상품명 유사도 높은 순으로 정렬 후 상위 5개만 상세 평가
+        product_candidates.sort(key=lambda x: x['product_similarity'], reverse=True)
+        top_candidates = product_candidates[:5]  # 상위 5개만
+        
+        logger.debug(f"⚡ 1단계 완료: {len(product_candidates)}개 후보 중 상위 {len(top_candidates)}개 상세 평가")
+        
+        # 2단계: 상위 후보들만 색상/사이즈 유사도 계산
+        best_match = None
+        best_similarity = 0.0
+        
+        for candidate in top_candidates:
+            row = candidate['row']
+            product_similarity = candidate['product_similarity']
+            
+            # 색상 유사도 계산
+            color_similarity = 100.0
             if color:
                 row_color_pattern = self.extract_color(str(row['옵션입력']))
                 if row_color_pattern:
                     color_similarity = self.calculate_similarity(color, row_color_pattern)
                 else:
-                    color_similarity = 0.0  # 색상 정보 없음
+                    color_similarity = 0.0
             
-            # 3. 사이즈 유사도 계산
-            size_similarity = 100.0  # 기본값 (사이즈 없으면 100%)
+            # 사이즈 유사도 계산
+            size_similarity = 100.0
             if size:
                 row_size_pattern = self.extract_size(str(row['옵션입력']))
                 if row_size_pattern:
                     size_similarity = self.calculate_similarity(size, row_size_pattern)
                 else:
-                    size_similarity = 0.0  # 사이즈 정보 없음
+                    size_similarity = 0.0
             
-            # 4. 종합 유사도 계산 (가중치 적용)
-            # 브랜드는 이미 100%이므로 제외하고 나머지만 계산
+            # 종합 유사도 계산
             total_similarity = (
-                product_similarity * 0.5 +   # 상품명 50%
-                size_similarity * 0.3 +      # 사이즈 30%
-                color_similarity * 0.2       # 색상 20%
+                product_similarity * 0.5 +
+                size_similarity * 0.3 +
+                color_similarity * 0.2
             )
             
-            logger.debug(f"유사도: 상품={product_similarity:.1f}%, 사이즈={size_similarity:.1f}%, 색상={color_similarity:.1f}%, 종합={total_similarity:.1f}%")
+            logger.debug(f"후보 평가: {row['상품명'][:20]}... (상품={product_similarity:.1f}%, 사이즈={size_similarity:.1f}%, 색상={color_similarity:.1f}%, 종합={total_similarity:.1f}%)")
             
-            # 종합 유사도가 너무 낮으면 스킵
+            # 종합 유사도가 60% 미만이면 스킵
             if total_similarity < 60:
                 continue
             
-            # 현재 후보 정보 저장
+            # 현재 후보 정보
             공급가 = row['공급가']
             중도매 = row['중도매']
             브랜드상품명 = f"{row['브랜드']} {row['상품명']}"
             
-            # ⚡ 조기 종료: 85% 이상이면 즉시 리턴 (충분히 좋은 매칭)
+            # 85% 이상이면 즉시 리턴
             if total_similarity >= 85:
                 logger.debug(f"✅ 높은 유사도 매칭 발견 ({total_similarity:.1f}%): {브랜드상품명} - 즉시 리턴!")
                 return 공급가, 중도매, 브랜드상품명, True
@@ -1140,7 +1155,6 @@ class BrandMatchingSystem:
                     'size_sim': size_similarity,
                     'color_sim': color_similarity
                 }
-                logger.debug(f"최고 유사도 업데이트: {브랜드상품명} ({total_similarity:.1f}%)")
 
         # 최고 유사도 매칭 결과 반환
         if best_match and best_similarity >= 60:
