@@ -286,6 +286,21 @@ class BrandMatchingSystem:
             logger.error(f"키워드 로드 실패: {e}")
             self.keyword_list = []
 
+    def calculate_similarity(self, str1: str, str2: str) -> float:
+        """두 문자열 간의 유사도를 계산 (0~100)"""
+        if not str1 or not str2:
+            return 0.0
+        
+        str1 = str1.lower().strip()
+        str2 = str2.lower().strip()
+        
+        if str1 == str2:
+            return 100.0
+        
+        # SequenceMatcher를 사용한 유사도 계산
+        similarity = SequenceMatcher(None, str1, str2).ratio() * 100
+        return similarity
+    
     def save_keywords(self):
         """현재 키워드 리스트를 엑셀 파일로 저장"""
         try:
@@ -1019,13 +1034,10 @@ class BrandMatchingSystem:
         
         logger.debug(f"⚡ 브랜드 '{brand}' 인덱스 검색 결과: {len(candidate_indices)}개 상품 (기존 대비 10배 빠름)")
 
-        # 매칭 후보들을 저장할 리스트 (정확도 순으로 정렬하기 위함)
-        matching_candidates = []
+        # ⚡ 유사도 매칭: 최고 점수 추적
+        best_match = None
+        best_similarity = 0.0
         processed_count = 0
-        
-        # ⚡ 최적화: 업로드 파일의 변형을 미리 생성 (캐싱)
-        upload_size_variants = self.parse_size_variants(size) if size else []
-        upload_color_variants = self.parse_color_variants(color) if color else []
         
         # 인덱스를 사용하여 직접 접근 (빠른 속도)
         for idx in candidate_indices:
@@ -1052,144 +1064,81 @@ class BrandMatchingSystem:
                 logger.warning(f"처리 개수 제한 (100개): 브랜드='{brand}' ({processed_count}개 처리됨)")
                 break
             
-            # 브랜드는 이미 필터링되었으므로 생략
-
-            # 2. 상품명 포함 관계 확인 (정규화된 상품명과 비교)
+            # 브랜드는 이미 인덱스로 필터링됨 (100% 매칭)
+            
+            # ⚡ 유사도 기반 매칭 시작
+            
+            # 1. 상품명 유사도 계산 (정규화된 상품명 비교)
             row_product = self.normalize_product_name(str(row['상품명']).strip())
-            if normalized_product not in row_product and row_product not in normalized_product:
+            product_similarity = self.calculate_similarity(normalized_product, row_product)
+            
+            # 상품명 유사도가 너무 낮으면 스킵 (빠른 필터링)
+            if product_similarity < 60:
                 continue
-
-            # 3. 색상 매칭 (색상이 제공된 경우에만)
+            
+            # 2. 색상 유사도 계산
+            color_similarity = 100.0  # 기본값 (색상 없으면 100%)
             if color:
                 row_color_pattern = self.extract_color(str(row['옵션입력']))
-                
-                # 먼저 전체 매칭 시도
-                color_match = False
-                if color in row_color_pattern:
-                    color_match = True
+                if row_color_pattern:
+                    color_similarity = self.calculate_similarity(color, row_color_pattern)
                 else:
-                    # 색상 변형 매칭 시도
-                    # 브랜드매칭시트의 색상 패턴에서 모든 변형 추출
-                    brand_color_variants = []
-                    if row_color_pattern:
-                        # 공백으로 분리된 각 색상에 대해 변형 추출
-                        color_tokens = row_color_pattern.split()
-                        for token in color_tokens:
-                            variants = self.parse_color_variants(token)
-                            brand_color_variants.extend(variants)
-                    
-                    # ⚡ 최적화: 이미 생성된 upload_color_variants 사용 (루프 밖에서 생성됨)
-                    # 각 변형들 간의 매칭 확인
-                    for brand_variant in brand_color_variants:
-                        for upload_variant in upload_color_variants:
-                            # 완전 일치 또는 포함 관계
-                            if (upload_variant == brand_variant or 
-                                upload_variant in brand_variant or 
-                                brand_variant in upload_variant):
-                                color_match = True
-                                break
-                        if color_match:
-                            break
-                
-                if not color_match:
-                    continue
-
-            # 4. 사이즈 매칭 - 개선된 로직 (정확도별 점수 부여)
-            row_size_pattern = self.extract_size(str(row['옵션입력']))
+                    color_similarity = 0.0  # 색상 정보 없음
             
-            match_score = 0  # 매칭 정확도 점수 (높을수록 정확)
-            match_type = ""  # 매칭 타입
-            
-            # 먼저 전체 매칭 시도 (가장 높은 점수)
-            if size in row_size_pattern:
-                match_score = 100
-                match_type = "직접 매칭"
-            else:
-                # 사이즈 변형을 이용한 매칭 시도
-                # 브랜드매칭시트의 사이즈 패턴에서 모든 변형 추출
-                brand_size_variants = []
+            # 3. 사이즈 유사도 계산
+            size_similarity = 100.0  # 기본값 (사이즈 없으면 100%)
+            if size:
+                row_size_pattern = self.extract_size(str(row['옵션입력']))
                 if row_size_pattern:
-                    # 공백으로 분리된 각 사이즈에 대해 변형 추출
-                    size_tokens = row_size_pattern.split()
-                    for token in size_tokens:
-                        variants = self.parse_size_variants(token)
-                        brand_size_variants.extend(variants)
-                
-                # ⚡ 최적화: 이미 생성된 upload_size_variants 사용 (루프 밖에서 생성됨)
-                
-                # 각 변형들 간의 매칭 확인 (정확도 순으로)
-                for brand_variant in brand_size_variants:
-                    for upload_variant in upload_size_variants:
-                        # 1. 완전 일치 (90점)
-                        if upload_variant == brand_variant:
-                            if match_score < 90:
-                                match_score = 90
-                                match_type = "완전 일치"
-                            break
-                        
-                        # 2. 숫자+단위 특별 처리 (80점)
-                        elif re.match(r'^\d+[a-z]*$', upload_variant) and re.match(r'^\d+[a-z]*$', brand_variant):
-                            upload_num = re.match(r'^(\d+)', upload_variant)
-                            brand_num = re.match(r'^(\d+)', brand_variant)
-                            
-                            if upload_num and brand_num and upload_num.group(1) == brand_num.group(1):
-                                if match_score < 80:
-                                    match_score = 80
-                                    match_type = "숫자 매칭"
-                                break
-                        
-                        # 3. 포함 관계 (길이 차이 고려하여 점수 차등)
-                        elif (upload_variant in brand_variant or brand_variant in upload_variant):
-                            # 길이 차이 확인
-                            min_len = min(len(upload_variant), len(brand_variant))
-                            max_len = max(len(upload_variant), len(brand_variant))
-                            
-                            # 길이 비율이 0.8 이상이면 높은 점수 (70점)
-                            if min_len / max_len >= 0.8:
-                                if match_score < 70:
-                                    match_score = 70
-                                    match_type = "높은 유사도 포함"
-                            # 길이 비율이 0.6 이상이면 낮은 점수 (50점)
-                            elif min_len / max_len >= 0.6:
-                                if match_score < 50:
-                                    match_score = 50
-                                    match_type = "낮은 유사도 포함"
+                    size_similarity = self.calculate_similarity(size, row_size_pattern)
+                else:
+                    size_similarity = 0.0  # 사이즈 정보 없음
             
-            # 매칭이 성공한 경우 처리
-            if match_score > 0:
-                공급가 = row['공급가']
-                중도매 = row['중도매']
-                브랜드상품명 = f"{row['브랜드']} {row['상품명']}"
-                
-                # ⚡ 최적화: 100점 (완벽한 매칭) 찾으면 즉시 리턴 (조기 종료)
-                if match_score == 100:
-                    logger.debug(f"✅ 완벽한 매칭 발견 (100점): {브랜드상품명} - 즉시 리턴!")
-                    return 공급가, 중도매, 브랜드상품명, True
-                
-                # 100점이 아니면 후보에 추가
-                matching_candidates.append({
-                    'score': match_score,
-                    'type': match_type,
+            # 4. 종합 유사도 계산 (가중치 적용)
+            # 브랜드는 이미 100%이므로 제외하고 나머지만 계산
+            total_similarity = (
+                product_similarity * 0.5 +   # 상품명 50%
+                size_similarity * 0.3 +      # 사이즈 30%
+                color_similarity * 0.2       # 색상 20%
+            )
+            
+            logger.debug(f"유사도: 상품={product_similarity:.1f}%, 사이즈={size_similarity:.1f}%, 색상={color_similarity:.1f}%, 종합={total_similarity:.1f}%")
+            
+            # 종합 유사도가 너무 낮으면 스킵
+            if total_similarity < 60:
+                continue
+            
+            # 현재 후보 정보 저장
+            공급가 = row['공급가']
+            중도매 = row['중도매']
+            브랜드상품명 = f"{row['브랜드']} {row['상품명']}"
+            
+            # ⚡ 조기 종료: 90% 이상이면 즉시 리턴 (완벽한 매칭)
+            if total_similarity >= 90:
+                logger.debug(f"✅ 높은 유사도 매칭 발견 ({total_similarity:.1f}%): {브랜드상품명} - 즉시 리턴!")
+                return 공급가, 중도매, 브랜드상품명, True
+            
+            # 최고 유사도 업데이트
+            if total_similarity > best_similarity:
+                best_similarity = total_similarity
+                best_match = {
+                    'similarity': total_similarity,
                     '공급가': 공급가,
                     '중도매': 중도매,
                     '브랜드상품명': 브랜드상품명,
-                    'row': row
-                })
-                
-                logger.debug(f"매칭 후보 추가: {브랜드상품명} (점수: {match_score}, 타입: {match_type})")
+                    'product_sim': product_similarity,
+                    'size_sim': size_similarity,
+                    'color_sim': color_similarity
+                }
+                logger.debug(f"최고 유사도 업데이트: {브랜드상품명} ({total_similarity:.1f}%)")
 
-        # 매칭 후보가 있으면 가장 높은 점수의 후보 선택
-        if matching_candidates:
-            # 점수순으로 정렬 (높은 점수가 먼저)
-            matching_candidates.sort(key=lambda x: x['score'], reverse=True)
-            
-            best_match = matching_candidates[0]
-            
-            logger.debug(f"최종 매칭 선택: {best_match['브랜드상품명']} (점수: {best_match['score']}, 타입: {best_match['type']})")
-            
+        # 최고 유사도 매칭 결과 반환
+        if best_match and best_similarity >= 60:
+            logger.debug(f"✅ 최종 매칭 선택: {best_match['브랜드상품명']} (유사도: {best_similarity:.1f}%)")
+            logger.debug(f"   상세: 상품={best_match['product_sim']:.1f}%, 사이즈={best_match['size_sim']:.1f}%, 색상={best_match['color_sim']:.1f}%")
             return best_match['공급가'], best_match['중도매'], best_match['브랜드상품명'], True
 
-        logger.debug("매칭 실패")
+        logger.debug(f"❌ 매칭 실패 (최고 유사도: {best_similarity:.1f}% < 60%)")
         return "매칭 실패", "", "", False
 
     def process_matching(self, sheet2_df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
