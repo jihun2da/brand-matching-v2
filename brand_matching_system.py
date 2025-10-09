@@ -363,9 +363,15 @@ class BrandMatchingSystem:
         try:
             normalized = name_str.lower()
             
-            # 컴파일된 패턴 사용 (안전하게)
-            if 'parentheses' in self._compiled_patterns:
-                normalized = self._compiled_patterns['parentheses'].sub('', normalized)
+            # ⚡ 최우선: 모든 괄호와 괄호 안의 내용을 제거 (무한 루프 방지)
+            # (S(3~4)~XL(7~8)) → 빈 문자열
+            # 러블리양말(S~XL) → 러블리양말
+            import re
+            normalized = re.sub(r'\([^()]*\)', '', normalized)  # 1차: 내부 괄호 제거
+            normalized = re.sub(r'\([^()]*\)', '', normalized)  # 2차: 외부 괄호 제거
+            normalized = re.sub(r'\([^()]*\)', '', normalized)  # 3차: 중첩 괄호 대비
+            
+            # 나머지 패턴 처리
             if 'brackets' in self._compiled_patterns:
                 normalized = self._compiled_patterns['brackets'].sub('', normalized)
             if 'braces' in self._compiled_patterns:
@@ -377,42 +383,12 @@ class BrandMatchingSystem:
             
             normalized = normalized.strip()
             
-            # 키워드 제거 (안전한 방식) - 버그 수정
+            # 키워드 제거 (단순화 - 괄호는 이미 제거됨)
             if self.keyword_list:
-                # * 기호로 감싸진 패턴 우선 처리
-                star_keywords = [kw for kw in self.keyword_list 
-                                if kw.startswith('*') and kw.endswith('*') and len(kw) > 2]
-                
-                for keyword in star_keywords:
-                    # * 기호 제거하여 실제 패턴 추출
-                    pattern_text = keyword[1:-1]  # *S~XL* → S~XL
-                    
-                    # 다양한 변형 생성
-                    variations = [
-                        f"({pattern_text})",  # (S~XL)
-                        f"({pattern_text.replace('~', '-')})",  # (S-XL)
-                        f"({pattern_text.replace('-', '~')})",  # (S~XL)
-                        pattern_text,  # S~XL
-                        pattern_text.replace('~', '-'),  # S-XL
-                        pattern_text.replace('-', '~'),  # S~XL
-                    ]
-                    
-                    for variation in variations:
-                        if variation in normalized:
-                            normalized = normalized.replace(variation, '')
-                            break
-                
-                # 일반 키워드 제거
-                regular_keywords = [kw for kw in self.keyword_list 
-                                   if not (kw.startswith('*') and kw.endswith('*'))]
-                
-                for keyword in regular_keywords:
-                    if not keyword:
+                # 일반 키워드만 제거 (괄호 안의 사이즈 패턴은 이미 제거됨)
+                for keyword in self.keyword_list:
+                    if not keyword or keyword.startswith('*'):
                         continue
-                    
-                    # 괄호와 함께 키워드 제거
-                    parentheses_pattern = re.compile(r'\(' + re.escape(keyword) + r'\)', re.IGNORECASE)
-                    normalized = parentheses_pattern.sub('', normalized)
                     
                     # 단독 키워드 제거
                     keyword_pattern = self._get_keyword_pattern(keyword)
@@ -1045,7 +1021,8 @@ class BrandMatchingSystem:
                 break
             
             # 1단계: 상품명 유사도만 빠르게 계산
-            row_product = self.normalize_product_name(str(row_dict.get('상품명', '')).strip())
+            row_product_raw = str(row_dict.get('상품명', '')).strip()
+            row_product = self.normalize_product_name(row_product_raw)
             product_similarity = self.calculate_similarity(normalized_product, row_product)
             
             # 상품명 유사도가 너무 낮으면 스킵
