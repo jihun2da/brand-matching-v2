@@ -411,8 +411,14 @@ class BrandMatchingSystem:
             
             # 캐시에 저장 (크기 제한 확인)
             with self._cache_lock:
+                # ⚡ 데드락 방지: Lock 안에서 직접 정리 (중첩 Lock 방지)
                 if len(self._normalized_cache) >= self._max_cache_size:
-                    self._clean_cache()
+                    # 오래된 항목의 절반 제거
+                    items_to_remove = len(self._normalized_cache) // 2
+                    keys_to_remove = list(self._normalized_cache.keys())[:items_to_remove]
+                    for key in keys_to_remove:
+                        del self._normalized_cache[key]
+                
                 self._normalized_cache[name_str] = normalized
             
             return normalized
