@@ -215,30 +215,25 @@ def show_matching_page(matching_system, file_processor):
         
         with download_col2:
             # 유사도 매칭 결과만 다운로드
-            if not similarity_df.empty and cached_matching_system:
-                from datetime import datetime
-                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"유사도매칭결과_{current_time}.xlsx"
-                temp_filename = f"temp_main_{filename}"
-                
+            if not similarity_df.empty:
                 try:
-                    cached_matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+                    from datetime import datetime
+                    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"유사도매칭결과_{current_time}.xlsx"
                     
-                    with open(temp_filename, 'rb') as f:
-                        file_data = f.read()
+                    # 메모리에서 직접 처리 (임시 파일 불필요)
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
                     
                     st.download_button(
                         label="🔍 유사도 매칭 결과",
-                        data=file_data,
+                        data=output.getvalue(),
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                         key="main_download_similarity"
                     )
-                    
-                    # 임시 파일 정리
-                    if os.path.exists(temp_filename):
-                        os.remove(temp_filename)
                         
                 except Exception as e:
                     st.error(f"유사도 결과 준비 중 오류: {str(e)}")
@@ -544,30 +539,24 @@ def show_results_with_similarity(result_df, similarity_df, matching_system):
         with download_col2:
             # 유사도 매칭 결과만 다운로드
             if not similarity_df.empty:
-                from datetime import datetime
-                current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-                filename = f"유사도매칭결과_{current_time}.xlsx"
-                temp_filename = f"temp_{filename}"
-                
-                # 임시 파일로 저장하여 스타일 적용
                 try:
-                    matching_system.save_similarity_results_to_excel(similarity_df, temp_filename)
+                    from datetime import datetime
+                    current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    filename = f"유사도매칭결과_{current_time}.xlsx"
                     
-                    with open(temp_filename, 'rb') as f:
-                        file_data = f.read()
+                    # 메모리에서 직접 처리
+                    output = io.BytesIO()
+                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                        similarity_df.to_excel(writer, sheet_name='유사도매칭결과', index=False)
                     
                     st.download_button(
                         label="🔍 유사도 매칭 결과만",
-                        data=file_data,
+                        data=output.getvalue(),
                         file_name=filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True,
                         key="download_similarity_only"
                     )
-                    
-                    # 임시 파일 정리
-                    if os.path.exists(temp_filename):
-                        os.remove(temp_filename)
                         
                 except Exception as e:
                     st.error(f"유사도 매칭 결과 준비 중 오류: {str(e)}")
