@@ -1059,9 +1059,9 @@ class BrandMatchingSystem:
                 logger.warning(f"⏰ 매칭 타임아웃 (3초): 브랜드='{brand}', 상품='{product[:30]}...' ({processed_count}개 처리됨)")
                 break
             
-            # 무한 루프 방지: 처리 개수 제한 (100개로 제한)
-            if processed_count > 100:
-                logger.warning(f"처리 개수 제한 (100개): 브랜드='{brand}' ({processed_count}개 처리됨)")
+            # 무한 루프 방지: 처리 개수 제한 (50개로 제한)
+            if processed_count > 50:
+                logger.warning(f"처리 개수 제한 (50개): 브랜드='{brand}' ({processed_count}개 처리됨)")
                 break
             
             # 브랜드는 이미 인덱스로 필터링됨 (100% 매칭)
@@ -1073,7 +1073,7 @@ class BrandMatchingSystem:
             product_similarity = self.calculate_similarity(normalized_product, row_product)
             
             # 상품명 유사도가 너무 낮으면 스킵 (빠른 필터링)
-            if product_similarity < 60:
+            if product_similarity < 70:
                 continue
             
             # 2. 색상 유사도 계산
@@ -1113,8 +1113,8 @@ class BrandMatchingSystem:
             중도매 = row['중도매']
             브랜드상품명 = f"{row['브랜드']} {row['상품명']}"
             
-            # ⚡ 조기 종료: 90% 이상이면 즉시 리턴 (완벽한 매칭)
-            if total_similarity >= 90:
+            # ⚡ 조기 종료: 85% 이상이면 즉시 리턴 (충분히 좋은 매칭)
+            if total_similarity >= 85:
                 logger.debug(f"✅ 높은 유사도 매칭 발견 ({total_similarity:.1f}%): {브랜드상품명} - 즉시 리턴!")
                 return 공급가, 중도매, 브랜드상품명, True
             
