@@ -332,17 +332,24 @@ class BrandMatchingSystem:
             
             normalized = normalized.strip()
             
-            # 키워드 제거 (안전한 방식)
+            # 키워드 제거 (안전한 방식) - 버그 수정
             if self.keyword_list:
                 # * 기호로 감싸진 패턴 우선 처리
                 star_keywords = [kw for kw in self.keyword_list 
                                 if kw.startswith('*') and kw.endswith('*') and len(kw) > 2]
                 
                 for keyword in star_keywords:
+                    # * 기호 제거하여 실제 패턴 추출
+                    pattern_text = keyword[1:-1]  # *S~XL* → S~XL
+                    
+                    # 다양한 변형 생성
                     variations = [
-                        keyword,
-                        keyword.replace('~', '-'),
-                        keyword.replace('-', '~'),
+                        f"({pattern_text})",  # (S~XL)
+                        f"({pattern_text.replace('~', '-')})",  # (S-XL)
+                        f"({pattern_text.replace('-', '~')})",  # (S~XL)
+                        pattern_text,  # S~XL
+                        pattern_text.replace('~', '-'),  # S-XL
+                        pattern_text.replace('-', '~'),  # S~XL
                     ]
                     
                     for variation in variations:
