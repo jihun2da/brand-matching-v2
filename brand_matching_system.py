@@ -14,15 +14,17 @@ from functools import lru_cache
 import concurrent.futures
 from threading import Lock
 from difflib import SequenceMatcher
+
+logger = logging.getLogger(__name__)
+
 try:
     import Levenshtein
     LEVENSHTEIN_AVAILABLE = True
 except ImportError:
     LEVENSHTEIN_AVAILABLE = False
     logger.warning("python-Levenshtein not available, using fallback similarity calculation")
-from brand_sheets_api import brand_sheets_api
 
-logger = logging.getLogger(__name__)
+from brand_sheets_api import brand_sheets_api
 
 class BrandMatchingSystem:
     """
@@ -623,7 +625,16 @@ class BrandMatchingSystem:
             processed_count = 0
             row_start_time = time.time()
             for idx in candidate_indices:
-                brand_row = self.brand_data.iloc[idx]
+                # 인덱스 유효성 검사
+                if idx >= len(self.brand_data):
+                    continue
+                
+                try:
+                    brand_row = self.brand_data.iloc[idx]
+                except Exception as e:
+                    logger.error(f"유사도 매칭 - 행 접근 오류 (인덱스 {idx}): {e}")
+                    continue
+                
                 processed_count += 1
                 
                 # 타임아웃 체크 (개별 상품당 3초)
@@ -1009,7 +1020,17 @@ class BrandMatchingSystem:
         
         # 인덱스를 사용하여 직접 접근 (빠른 속도)
         for idx in candidate_indices:
-            row = self.brand_data.iloc[idx]
+            # 인덱스 유효성 검사
+            if idx >= len(self.brand_data):
+                logger.warning(f"유효하지 않은 인덱스: {idx} (최대: {len(self.brand_data)-1})")
+                continue
+            
+            try:
+                row = self.brand_data.iloc[idx]
+            except Exception as e:
+                logger.error(f"행 접근 오류 (인덱스 {idx}): {e}")
+                continue
+            
             processed_count += 1
             
             # 타임아웃 체크 (단일 행 매칭이 1초 초과 시 중단)
