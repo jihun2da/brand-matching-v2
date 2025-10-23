@@ -572,12 +572,25 @@ class BrandMatchingSystem:
         if exact_pattern:
             return 100.0  # ✅ 정확히 일치!
         
-        # 2. 괄호 없이 공백으로 분리된 경우
+        # 2. 괄호가 포함된 사이즈 매칭 (새로 추가)
+        # 예: "S(10~18)" vs "S(10~18)" 또는 "S(10~18)" vs "S(10~18)|M(18~24)"
+        if upload_size in brand_size_pattern:
+            return 100.0  # ✅ 괄호 포함 사이즈 매칭!
+        
+        # 3. 사이즈 코드만 추출하여 매칭
+        # 예: "S(10~18)" → "S" 추출
+        upload_size_code = upload_size.split('(')[0] if '(' in upload_size else upload_size
+        brand_size_codes = re.findall(r'\b([A-Z]+)(?:\d+)?\b', brand_size_pattern)
+        
+        if upload_size_code in brand_size_codes:
+            return 100.0  # ✅ 사이즈 코드 매칭!
+        
+        # 4. 괄호 없이 공백으로 분리된 경우
         # "M L XL" 형태
         if f' {upload_size} ' in f' {brand_size_pattern} ':
             return 100.0
         
-        # 3. 괄호 제거 후 단어 단위로 매칭
+        # 5. 괄호 제거 후 단어 단위로 매칭
         # "(XS)[S][M][L][XL]" → "XS S M L XL"
         cleaned = re.sub(r'[\[\]()]', ' ', brand_size_pattern)
         size_tokens = [s.strip() for s in cleaned.split() if s.strip()]
