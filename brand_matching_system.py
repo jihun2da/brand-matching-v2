@@ -500,6 +500,41 @@ class BrandMatchingSystem:
         
         return best_similarity
     
+    def normalize_size_format(self, size: str) -> str:
+        """사이즈 형식을 정규화하여 매칭 개선"""
+        if not size:
+            return ""
+        
+        import re
+        
+        # 1. 공백 제거
+        size = size.strip()
+        
+        # 2. 괄호 제거 후 다시 추가 (일관된 형식으로)
+        # "L 24~36" → "L(24~36)"
+        # "L(24-36)" → "L(24~36)"
+        
+        # 사이즈 코드와 숫자 범위 분리
+        match = re.match(r'^([A-Z]+)\s*[\(]?([0-9]+)\s*[-~]\s*([0-9]+)\s*[\)]?$', size)
+        if match:
+            size_code = match.group(1)
+            start_num = match.group(2)
+            end_num = match.group(3)
+            return f"{size_code}({start_num}~{end_num})"
+        
+        # 3. 기호 통일 (~로 통일)
+        size = size.replace('-', '~')
+        
+        # 4. 괄호가 없는 경우 추가
+        if '(' not in size and '~' in size:
+            # "L 24~36" → "L(24~36)"
+            parts = size.split('~')
+            if len(parts) == 2:
+                size_code = parts[0].strip().split()[-1]  # 마지막 단어가 사이즈 코드
+                return f"{size_code}({parts[0].strip().replace(size_code, '').strip()}~{parts[1].strip()})"
+        
+        return size
+
     def check_size_match(self, upload_size: str, brand_size_pattern: str) -> float:
         """
         사이즈 정확 매칭 체크 (오매칭 방지 강화 + 주니어 사이즈 차단)
@@ -519,7 +554,8 @@ class BrandMatchingSystem:
         if not upload_size or not brand_size_pattern:
             return 0.0
         
-        upload_size = upload_size.strip().upper()
+        # 사이즈 형식 정규화
+        upload_size = self.normalize_size_format(upload_size.strip().upper())
         brand_size_pattern = brand_size_pattern.upper()
         
         import re
@@ -1331,6 +1367,9 @@ class BrandMatchingSystem:
         
         size = str(size).strip().lower()
         color = str(color).strip().lower()
+        
+        # 사이즈 형식 정규화
+        size = self.normalize_size_format(size)
 
         # 상품명 정규화 (키워드 제거)
         normalized_product = self.normalize_product_name(product)
