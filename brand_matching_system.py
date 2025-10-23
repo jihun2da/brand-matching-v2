@@ -1357,8 +1357,9 @@ class BrandMatchingSystem:
             row_product = self.normalize_product_name(row_product_raw)
             product_similarity = self.calculate_similarity(normalized_product, row_product)
             
-            # 상품명 유사도가 너무 낮으면 스킵 (60%로 완화하여 매칭률 향상)
-            if product_similarity < 60:
+            # 상품명 유사도가 너무 낮으면 스킵 (85%로 강화하여 정확도 향상)
+            # 목적: 다른 미니로브 상품과의 오매칭 방지
+            if product_similarity < 85:
                 continue
             
             # 길이 비율 체크
